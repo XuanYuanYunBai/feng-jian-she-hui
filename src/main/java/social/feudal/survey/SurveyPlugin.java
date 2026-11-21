@@ -1,5 +1,6 @@
 package social.feudal.survey;
 
+import social.feudal.freight.FreightService;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +19,7 @@ public final class SurveyPlugin extends JavaPlugin {
     private volatile String failure;
     private volatile boolean closing;
     private SurveyStore store;
+    private FreightService freight;
     private MapIdentity map;
     private Rules rules;
     private int limit;
@@ -50,6 +52,7 @@ public final class SurveyPlugin extends JavaPlugin {
             if (legacy) getLogger().info("0.1.0 勘测记录已归档，按原中心复核。暂停状态请使用 /survey resume");
             if (progress != null && progress.ring().outer() > limit)
                 throw new IllegalArgumentException("预算低于已登记半径，请恢复 max-radius");
+            freight = new FreightService(this, world, getDataFolder().toPath().resolve("freight.sqlite"));
             getServer().getScheduler().runTaskTimer(this, this::tick, 1L, ticks);
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "勘测初始化失败", e);
@@ -188,6 +191,7 @@ public final class SurveyPlugin extends JavaPlugin {
 
     @Override public void onDisable() {
         closing = true;
+        if (freight != null) freight.close();
         // The store closes on its owner thread, after already submitted measurements.
         worker.execute(() -> {
             try { if (store != null) store.close(); }

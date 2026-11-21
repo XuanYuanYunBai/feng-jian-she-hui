@@ -1,14 +1,22 @@
 name: FeudalSurvey
 main: social.feudal.survey.SurveyPlugin
-version: '0.1.1'
+version: '0.2.0'
 api-version: '26.3'
-description: 封建社会 · 主世界资源勘测
+description: 封建社会 · 主世界资源勘测与陆路货运
 commands:
   survey:
     description: 查看主世界勘测进度，启动、暂停或继续勘测
     usage: /survey <start|status|pause|resume>
     permission: feudal.survey.admin
+  freight:
+    description: 公共货线装货、运输与签收
+    usage: /freight routes | route 名称 起点X 桶Y 起点Z 终点X 终点Z | send 货线 运单号 [收货人] | status [运单号] | accept 运单号
+    permission: feudal.freight.use
 permissions:
+  feudal.freight.use:
+    default: true
+  feudal.freight.admin:
+    default: op
   feudal.survey.admin:
     description: 管理开服勘测与查看矿产统计
     default: op

@@ -8,3 +8,6 @@ minimum-blocks:
   iron: 4096
   copper: 2048
   gold: 512
+
+freight:
+  pause-when-empty: true
