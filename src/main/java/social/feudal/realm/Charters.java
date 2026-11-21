@@ -89,6 +89,7 @@ final class Charters {
             }
             if(!preview){
                 s.titleRow(id,name,kind.equals("流官")?"辖区":kind,parent,kind.equals("流官")?"流官":"封契",grantee,b.west(),b.north());
+                s.politics.attach(s.title(id));
                 transfer(id,b);
             }
             return result;
@@ -101,7 +102,8 @@ final class Charters {
             require(!terms.isBlank() && terms.length()<=120,"请写明特许缘由与条件（1–120字）");
             newId(id);available(ruler,b);
             s.titleRow(id,name,rank,empire,"直属特许",grantee,b.west(),b.north());
-            transfer(id,b);
+            s.politics.attach(s.title(id));
+                transfer(id,b);
             s.update("INSERT INTO instrument(title,period,event) VALUES(?,COALESCE((SELECT v FROM setting WHERE k='period'),1),?)",
                     id,"帝国直属特许 · "+terms);
             return null;
@@ -125,6 +127,7 @@ final class Charters {
             require(ESTATES.contains(kind),"可授庄园、修院、磨坊或地租");
             require(parent.equals(s.owner(d.x(),d.z())) && s.value("SELECT title FROM tax_right WHERE depot=?",d.id())==null,"该税源不在可处分的直辖收入中");
             s.titleRow(id,name,kind,parent,"收益封契",grantee,d.x(),d.z());
+            s.politics.attach(s.title(id));
             s.update("INSERT INTO tax_right VALUES(?,?)",d.id(),id);return null;
         });
     }

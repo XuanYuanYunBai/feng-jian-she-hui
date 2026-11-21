@@ -27,7 +27,10 @@ final class RealmDialogs {
         for (var t : titles.subList((page-1)*PAGE_SIZE, Math.min(titles.size(), page*PAGE_SIZE)))
             buttons.add(command(t.name(), "realm brief " + t.id()));
         navigation(buttons, "realm atlas ", page, count);
-        buttons.add(command("展开疆域图", "realm map"));
+        buttons.add(command("国家疆域", "realm map country"));
+        buttons.add(command("帝国成员图","realm map empire"));
+        buttons.add(command("外交与国际组织","realm diplomacy"));
+        buttons.add(command("庄园与建领公议","realm estates"));
         buttons.add(command("查阅税仓", "realm accounts"));
         show(p, "封建社会", List.of(text("纹章院　·　领地与封契"),
                 text("登记领地与地产　" + titles.size() + " 处　｜　第 " + page + " / " + count + " 页")),
@@ -37,12 +40,25 @@ final class RealmDialogs {
     void brief(Player p, RealmStore.Title t) throws SQLException {
         var s = realm.store;
         String beneficiary = s.value("SELECT tax_right.title FROM depot JOIN tax_right ON depot.id=tax_right.depot WHERE x=? AND z=?", t.x(), t.z());
-        String parent = t.parent()==null ? "最高席位" : s.title(t.parent()).name();
-        var body = List.of(text(t.rank() + "　·　" + t.charter()), text("所属国家　" + s.polity(t.id()) + "\n直属上级　" + parent),
+        String parent = t.parent()==null ? "无" : t.parent().equals("crown")?"帝位（依封契）":s.title(t.parent()).name();
+        var body = new ArrayList<>(List.of(text(t.rank() + "　·　" + t.charter()), text((s.politics.nation(t.id())==null?"领产登记　":"所属国家　") + s.polity(t.id()) + "\n直属上级　" + parent),
+                text("帝国关系　"+(s.politics.imperial(t.id())?"帝国境内":"帝国外")+"　｜　档案代号　"+t.id()),
                 text("法定任命　" + realm.display(t.lawful()) + "\n实际持印　" + realm.display(t.seal())),
                 text("驻地区块　" + t.x() + "，" + t.z() + "　｜　直辖 " + s.number("SELECT count(*) FROM land WHERE title=?",t.id()) + " 区块"),
-                text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + realm.taxes.balance(t)));
-        show(p, t.name(), body, List.of(), List.of(command("返回纹章院", "realm atlas"), command("查阅税仓", "realm accounts")), 2);
+                text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + (p.getUniqueId().toString().equals(t.seal())?realm.taxes.balance(t):"仅持印人可查"))));
+        var buttons=new ArrayList<ActionButton>();
+        if(t.rank().equals("地主") && s.politics.member(Politics.EMPIRE,t.id())){
+            String state=s.value("SELECT state || ' · ' || reason FROM peerage WHERE title=?",t.id());
+            body.add(text("爵位请书　"+(state==null?"尚未递交":state)));
+            var actor=p.getUniqueId().toString();
+            if(actor.equals(t.seal()))buttons.add(command("向皇廷请爵","realm peer "+t.id()+" 申请 请核准公议与疆界"));
+            if(actor.equals(s.title("crown").seal()) && state!=null && state.startsWith("待审")){
+                buttons.add(command("核准伯爵头衔","realm peer "+t.id()+" 批准 皇廷查验公议"));
+                buttons.add(command("驳回请爵","realm peer "+t.id()+" 驳回 须补充担保"));
+            }
+        }
+        buttons.add(command("返回纹章院","realm atlas"));buttons.add(command("外交与国际组织","realm diplomacy"));buttons.add(command("查阅税仓","realm accounts"));
+        show(p,t.name(),body,List.of(),buttons,2);
     }
 
     void crew(Player p,RealmStore.Depot d)throws SQLException{

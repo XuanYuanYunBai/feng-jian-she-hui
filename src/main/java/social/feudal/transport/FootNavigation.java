@@ -7,7 +7,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
 /** Mannequins have no mob navigation. Plan short walks on loaded, supported blocks and let entity physics move the worker. */
-final class FootNavigation {
+public final class FootNavigation {
     private record Cell(int x,int y,int z){
         static Cell at(Location l){return new Cell(l.getBlockX(),l.getBlockY(),l.getBlockZ());}
         int distance(Cell other){return Math.abs(x-other.x)+Math.abs(y-other.y)+Math.abs(z-other.z);}
@@ -22,8 +22,8 @@ final class FootNavigation {
         final Deque<Cell> path=new ArrayDeque<>();
     }
     private final Map<LivingEntity,Walk> walks=new HashMap<>();
-    FootNavigation(Plugin plugin){Bukkit.getScheduler().runTaskTimer(plugin,this::tick,1,1);}
-    void toward(LivingEntity body,Location goal,double speed){
+    public FootNavigation(Plugin plugin){Bukkit.getScheduler().runTaskTimer(plugin,this::tick,1,1);}
+    public void toward(LivingEntity body,Location goal,double speed){
         target(body,goal,speed,false);
     }
     void onRoad(LivingEntity body,Location goal,double speed){target(body,goal,speed,true);}
@@ -42,6 +42,28 @@ final class FootNavigation {
         var below=feet.getRelative(0,-1,0);
         return feet.isPassable() && !feet.isLiquid() && feet.getRelative(0,1,0).isPassable()
                 && !below.isPassable() && below.getCollisionShape().getBoundingBoxes().stream().anyMatch(b->b.getMaxY()<=1.01 && b.getMaxY()>=.45);
+    }
+    /** Walkable crop cells within the mill's service distance, over loaded terrain only. */
+    public static Set<org.bukkit.block.Block> serviceArea(Location door,int limit){
+        var world=door.getWorld();var start=Cell.at(door);
+        var visited=new HashSet<Cell>();var queue=new ArrayDeque<Cell>();var result=new HashSet<org.bukkit.block.Block>();
+        if(!floor(world,start))return result;
+        queue.add(start);visited.add(start);
+        for(int distance=0;distance<=limit && !queue.isEmpty();distance++){
+            for(int layer=queue.size();layer>0;layer--){
+                var c=queue.removeFirst();
+                var feet=world.getBlockAt(c.x,c.y,c.z);
+                if(feet.getRelative(0,-1,0).getType()==Material.FARMLAND)result.add(feet);
+                if(distance==limit)continue;
+                for(var dir:DIRECTIONS)for(int dy:new int[]{0,1,-1}){
+                    var next=new Cell(c.x+dir[0],c.y+dy,c.z+dir[1]);
+                    if(!floor(world,next) || dy>0 && !feet.getRelative(0,2,0).isPassable())continue;
+                    if(visited.add(next))queue.addLast(next);
+                    break;
+                }
+            }
+        }
+        return result;
     }
     private static void route(World world,Cell start,Cell goal,Deque<Cell> path){
         path.clear();var queue=new PriorityQueue<Node>(Comparator.comparingInt(Node::cost).thenComparingInt(n->-n.spent()));

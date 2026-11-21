@@ -20,7 +20,8 @@ class AtlasTest {
         }
         try(var db=new RealmStore(file)){
             assertThrows(IllegalArgumentException.class,()->db.checkWorld("other"));
-            assertEquals("河湾帝国",db.polity("abbey"));
+            assertEquals("圣弥额尔主教驻地",db.polity("abbey"));
+            assertTrue(db.politics.imperial("abbey"));
             assertEquals(5,db.depots().size());
         }
     }

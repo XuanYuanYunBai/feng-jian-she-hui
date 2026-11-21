@@ -83,6 +83,10 @@ final class Succession {
     void vacate(String id,String actor)throws SQLException{
         s.atomic(()->{
             var t=law.acts(id,actor);
+            if(id.equals("crown")){
+                s.update("UPDATE title SET lawful=?,seal=? WHERE id=?",VACANT,VACANT,id);
+                record(id,"帝位出缺，候选人由选侯议决");return null;
+            }
             String heir=s.value("SELECT heir FROM office WHERE id=?",id);
             require(heir!=null,"请先登记暂管人或家产继承人");
             capacity(t,heir);
@@ -152,7 +156,10 @@ final class Succession {
                 law.acts(crown?id:empire.id(),actor);law.acts(crown?empire.id():id,r.getString(3));
                 require(t.rank().equals(crown?"公爵":"国王") && empire.rank().equals("皇帝"),"缔约地位已改变");
                 if(crown)s.update("UPDATE title SET rank='国王' WHERE id=?",id);
-                else s.update("UPDATE title SET parent=NULL WHERE id=?",id);
+                else {
+                    s.update("UPDATE title SET parent=NULL WHERE id=?",id);
+                    s.politics.removeMember(Politics.EMPIRE,id);
+                }
                 record(id,r.getString(1)+"生效 · "+r.getString(2));
             }
             s.update("UPDATE pact SET accepted=1 WHERE id=?",id);return null;

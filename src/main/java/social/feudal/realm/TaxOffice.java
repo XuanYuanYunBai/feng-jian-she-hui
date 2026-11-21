@@ -25,14 +25,28 @@ final class TaxOffice {
         tag=new NamespacedKey(realm.plugin,"tax_crate");
         couriers=new TaxCouriers(this);
         activeSeconds=realm.store.number("SELECT v FROM setting WHERE k='seconds'");
-        if(realm.store.ready())ledger.begin(ledger.period());
+        if(realm.store.ready())openPeriod(ledger.period());
         Bukkit.getScheduler().runTaskTimer(realm.plugin,this::tick,20,20);
+    }
+    void openPeriod(int period)throws SQLException{
+        var tendered=new HashMap<String,Integer>();
+        for(var d:realm.store.depots()){
+            var bin=realm.fixtures.bin(d.x(),d.z(),"stock",d.id());
+            if(bin==null)continue;
+            var reserved=realm.store.number("""
+                SELECT coalesce(sum(due-automatic-packed),0) FROM assessment JOIN tendered_tax USING(depot,period) WHERE depot=?
+                """,d.id())+realm.store.number("""
+                SELECT coalesce(sum(amount),0) FROM crate JOIN parcel USING(id) JOIN tendered_tax USING(depot,period)
+                WHERE depot=? AND staged=0""",d.id());
+            tendered.put(d.id(),Math.max(0,count(WarehouseFixtures.inventory(bin))-reserved));
+        }
+        ledger.begin(period,tendered);
     }
     private void tick(){
         if(Bukkit.getOnlinePlayers().isEmpty())return;
         try{
             if(!realm.store.ready())return;
-            if(++activeSeconds>=1200){ledger.begin(ledger.period()+1);activeSeconds=0;}
+            if(++activeSeconds>=1200){openPeriod(ledger.period()+1);activeSeconds=0;}
             if(activeSeconds%10==0){
                 saveTime();
                 for(var t:realm.store.titles())migrate(t);
@@ -89,7 +103,13 @@ final class TaxOffice {
             var key=receipt("staged/"+id);
             if(!data.has(key)){
                 int slot=inv.firstEmpty();if(slot<0)break;
-                inv.setItem(slot,box(ledger.crate(id),d));
+                var crate=ledger.crate(id);
+                var parcel=box(crate,d);
+                if(realm.store.number("SELECT count(*) FROM tendered_tax JOIN crate USING(depot,period) WHERE crate.id=?",id)>0){
+                    if(count(inv)<crate.amount())break;
+                    inv.removeItem(new ItemStack(Material.WHEAT,crate.amount()));
+                }
+                inv.setItem(slot,parcel);
                 data.set(key,PersistentDataType.BYTE,(byte)1);
             }
             stocked.add(id);

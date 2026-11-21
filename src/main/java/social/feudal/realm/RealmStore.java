@@ -7,6 +7,7 @@ import java.util.*;
 /** One political register per overworld. All writes run on the server thread. */
 public final class RealmStore implements AutoCloseable {
     final Connection db;
+    final Politics politics;
     public record Title(String id, String name, String rank, String parent, String charter,
                         String lawful, String seal, int x, int z) {}
     public record Land(int x, int z, String title) {}
@@ -27,7 +28,8 @@ public final class RealmStore implements AutoCloseable {
             update("""
                 CREATE TABLE IF NOT EXISTS depot(id TEXT PRIMARY KEY,name TEXT NOT NULL,x INTEGER NOT NULL,z INTEGER NOT NULL,
                 yield INTEGER NOT NULL CHECK(yield>0),FOREIGN KEY(x,z) REFERENCES land(x,z))""");
-        } catch (SQLException ex) { db.close(); throw ex; }
+            politics=new Politics(this);
+        } catch (SQLException | RuntimeException ex) { db.close(); throw ex; }
     }
     interface Write<T> { T run() throws SQLException; }
     <T> T atomic(Write<T> work) throws SQLException {
@@ -78,6 +80,7 @@ public final class RealmStore implements AutoCloseable {
                 }
                 q.executeBatch();
             }
+            politics.bootstrap(false);
             depotRow("town","王城市集",x,z);
             depotRow("mill","西磨坊",x-5,z);
             depotRow("ford","东渡仓",x+7,z);
@@ -128,12 +131,8 @@ public final class RealmStore implements AutoCloseable {
         });
     }
     public String polity(String id) throws SQLException {
-        Title t=title(id);
-        while(t.parent()!=null){
-            if(t.rank().equals("国王"))return t.name()+"（"+title(t.parent()).name()+"内）";
-            t=title(t.parent());
-        }
-        return t.name();
+        String country=politics.nation(id);
+        return country==null?title("crown").name():title(country).name();
     }
     @Override public void close() throws SQLException { db.close(); }
 }

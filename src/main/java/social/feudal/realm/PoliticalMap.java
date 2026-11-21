@@ -16,9 +16,11 @@ final class PoliticalMap extends MapRenderer {
     private final Map<UUID,Integer> drawn=new HashMap<>();
     private final RealmStore store;
     private int revision;
+    private final Set<UUID> imperial=new HashSet<>();
+    void empire(UUID viewer,boolean enabled){if(enabled)imperial.add(viewer);else imperial.remove(viewer);drawn.remove(viewer);}
     PoliticalMap(RealmStore store){super(true);this.store=store;}
     void invalidate(){revision++;}
-    void forget(UUID viewer){drawn.remove(viewer);lenses.remove(viewer);}
+    void forget(UUID viewer){drawn.remove(viewer);lenses.remove(viewer);imperial.remove(viewer);}
     void local(UUID viewer,int x,int z){
         lenses.put(viewer,new Lens(new Charters.Bounds(x-12,z-12,x+12,z+12),null,"25 x 25 区块"));
         drawn.remove(viewer);
@@ -44,15 +46,22 @@ final class PoliticalMap extends MapRenderer {
             double scale=Math.min(116.0/w,72.0/h);
             int left=(int)((128-w*scale)/2),top=20+(int)((72-h*scale)/2);
             for(int y=0;y<128;y++)for(int x=0;x<128;x++)c.setPixelColor(x,y,PAPER);
-            c.drawText(6,4,MapLegend.FONT,lens==null?"帝国疆域图":"地方勘界图");
+            c.drawText(6,4,MapLegend.FONT,lens==null?(imperial.contains(uuid)?"帝国疆域图":"国界图"):"地方勘界图");
             Map<String,Integer> key=new HashMap<>();
             for(int i=0;i<titles.size();i++)key.put(titles.get(i).id(),i);
+            var fills=new HashMap<String,Color>();
+            for(var t:titles){
+                String country=store.politics.nation(t.id());
+                Color fill=COLORS[key.get(country==null?"crown":country)%COLORS.length];
+                if(imperial.contains(uuid))fill=store.politics.imperial(t.id())?COLORS[2]:new Color(155,151,126);
+                fills.put(t.id(),fill);
+            }
             for(var l:lands){
                 if(!area.contains(l.x(),l.z()))continue;
                 int x=left+(int)((l.x()-area.west())*scale),y=top+(int)((l.z()-area.north())*scale);
                 int xEnd=Math.max(x+1,left+(int)((l.x()-area.west()+1)*scale));
                 int yEnd=Math.max(y+1,top+(int)((l.z()-area.north()+1)*scale));
-                var fill=COLORS[key.get(l.title())%COLORS.length];
+                var fill=fills.get(l.title());
                 for(int j=y;j<yEnd;j++)for(int i=x;i<xEnd;i++)c.setPixelColor(i,j,fill);
             }
             for(int i=0;i<titles.size();i++){

@@ -26,7 +26,10 @@ final class CharterOffice {
             }
             case "register" -> {
                 usage(a.length==6,"register 君主头衔 西 北 东 南");var b=bounds(a,2);
-                law.register(actor,a[1],b);s.sendMessage("已登记 "+b.area()+" 区块直辖地");
+                law.acts(a[1],actor);
+                var sites=realm.diplomacy.column("SELECT id FROM manor WHERE owner=? AND (x >> 4) BETWEEN ? AND ? AND (z >> 4) BETWEEN ? AND ?",actor,b.west(),b.east(),b.north(),b.south());
+                RealmStore.require(sites.size()==1,"请在选区先立庄，或在拟设庄宅办理 /realm frontier 庄园 头衔 西 北 东 南");
+                realm.manors.run(p,new String[]{"frontier",sites.getFirst(),a[1],a[2],a[3],a[4],a[5]});
             }
             case "preview","grant" -> {
                 usage(a.length==10,a[0]+" 上级 公爵|伯爵|流官 新ID 领名 人名 西 北 东 南");

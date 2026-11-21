@@ -15,3 +15,8 @@ freight:
 # 直辖税仓到本领驻地的曼哈顿区块距离，每步所含的区块数。改值从下一税期生效。
 realm:
   chunks-per-tax-step: 1
+
+  # 每个活跃生产季的秒数；无人时暂停。
+  season-seconds: 21600
+  # 公示同时满足现实答辩期和生产季要求。
+  notice-seconds: 86400

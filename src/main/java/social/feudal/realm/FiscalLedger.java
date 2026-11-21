@@ -16,6 +16,7 @@ final class FiscalLedger {
         require(chunksPerStep>=1 && chunksPerStep<=64,"税距步长须为 1–64 区块");
         this.chunksPerStep=chunksPerStep;
         s=store;
+        s.update("CREATE TABLE IF NOT EXISTS tendered_tax(depot TEXT,period INTEGER,PRIMARY KEY(depot,period))");
         s.update("""
             CREATE TABLE IF NOT EXISTS assessment(depot TEXT REFERENCES depot(id),period INTEGER,title TEXT REFERENCES title(id),
             due INTEGER NOT NULL,automatic INTEGER NOT NULL DEFAULT 0,packed INTEGER NOT NULL DEFAULT 0,
@@ -43,19 +44,23 @@ final class FiscalLedger {
         return title;
     }
     int period()throws SQLException{return Math.max(1,s.number("SELECT v FROM setting WHERE k='period'"));}
-    void begin(int period)throws SQLException{
+    void begin(int period)throws SQLException{begin(period,null);}
+    void begin(int period,Map<String,Integer> tendered)throws SQLException{
         s.atomic(()->{
             require(period==period() || period==period()+1,"税期须连续");
             if(period>period())s.update("INSERT OR REPLACE INTO setting VALUES('seconds',0)");
             for(var d:s.depots()){
                 if(s.number("SELECT v FROM setting WHERE k=?","first:"+d.id())>period)continue;
+                int due=tendered==null?d.yield():tendered.getOrDefault(d.id(),0);
+                if(due==0)continue;
                 String title=right(d);
                 if(s.update("INSERT OR IGNORE INTO assessment(depot,period,title,due) VALUES(?,?,?,?)",
-                        d.id(),period,title,d.yield())==0)continue;
+                        d.id(),period,title,due)==0)continue;
                 var seat=s.title(title);
                 int steps=Math.abs(seat.x()-d.x())+Math.abs(seat.z()-d.z());
-                int amount=d.yield()*rate(Math.ceilDiv(steps,chunksPerStep))/100;
+                int amount=(int)((long)due*rate(Math.ceilDiv(steps,chunksPerStep))/100);
                 s.update("INSERT INTO quota VALUES(?,?,?)",d.id(),period,amount);
+                if(tendered!=null)s.update("INSERT INTO tendered_tax VALUES(?,?)",d.id(),period);
             }
             s.update("INSERT OR REPLACE INTO setting VALUES('period',?)",period);
             return null;
@@ -88,7 +93,7 @@ final class FiscalLedger {
                 int amount=courier?auto:a.remaining()-auto;
                 while(amount>0){
                     // Eight is the base foot load. A pack or pack animal can carry several sealed lots.
-                    int load=courier?Math.min(8,amount):amount;
+                    int load=courier?Math.min(8,amount):Math.min(64,amount);
                     String id=UUID.randomUUID().toString();
                     s.update("INSERT INTO crate(id,depot,period,title,amount,carrier) VALUES(?,?,?,?,?,'warehouse')",id,d.id(),period,title,load);
                     s.update("INSERT INTO parcel(id,automatic) VALUES(?,?)",id,courier?1:0);

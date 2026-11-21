@@ -19,6 +19,10 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final World world;
     final RealmStore store;
     final RealmDialogs dialogs;
+    final DiplomacyDesk diplomacy;
+    final Contributions contributions;
+    final ManorOffice manors;
+    final MillOffice mills;
     final Council council;
     final CharterOffice charters;
     final DepotMarkers markers;
@@ -31,11 +35,12 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     public RealmService(JavaPlugin plugin,World world,Path path,social.feudal.transport.TransportCrew crews) throws SQLException {
         this.crews=crews;this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
-        dialogs=new RealmDialogs(this);
+        contributions=new Contributions(store,path.resolveSibling("freight.sqlite"));
+        dialogs=new RealmDialogs(this);diplomacy=new DiplomacyDesk(this);
         charters=new CharterOffice(this);
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
-        council=new Council(this);
+        council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);
         if(store.ready()) restoreMap();
         markers=new DepotMarkers(this);new SeatEnvoys(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
@@ -81,14 +86,17 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 return true;
             }
             if(action.equals("init")){
-                RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要建国权限");
-                usage(a.length==2,"init 在线君主名");
+                RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要初始化世界的权限");
+                usage(a.length<=2,"init [在线皇帝名]");
                 var l=world.getSpawnLocation();
-                store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,actor(a[1]));
-                council.succession.sync();taxes.ledger.begin(1);restoreMap();markers.refresh();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
+                store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,a.length==2?actor(a[1]):"npc-皇廷署理");
+                council.succession.sync();taxes.openPeriod(1);restoreMap();markers.refresh();s.sendMessage("河湾帝国及初始成员已登记。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
+                case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer" -> manors.run(player(s),a);
+                case "diplomacy","org","document","debate","compose","agenda","treaty","sign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "equip" -> {usage(a.length==3,"equip 税仓ID speed|pack|mule");taxes.couriers.equip(player(s),taxes.ledger.depot(a[1]),a[2]);}
@@ -113,7 +121,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 case "map","local" -> {
                     Player p=player(s);inWorld(p);
                     if(action.equals("local"))renderer.local(p.getUniqueId(),p.getLocation().getBlockX()>>4,p.getLocation().getBlockZ()>>4);
-                    else clearPreview(p);
+                    else {usage(a.length==1 || a.length==2 && Set.of("empire","country").contains(a[1]),"map [country|empire]");
+                        clearPreview(p);renderer.empire(p.getUniqueId(),a.length==2 && a[1].equals("empire"));}
                     equipMap(p);s.sendMessage("已展开疆域图，右键查阅政治图册");
                 }
                 case "here" -> {
