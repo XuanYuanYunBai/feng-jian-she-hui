@@ -2,7 +2,6 @@ package social.feudal.realm;
 
 import java.sql.SQLException;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.Inventory;
 import social.feudal.transport.TransportCrew;
 import social.feudal.transport.TransportCrew.Team;
 import net.kyori.adventure.text.Component;
@@ -42,17 +41,7 @@ final class TaxCouriers implements Listener {
         return result;
     }
     static String crewId(RealmStore.Depot d){return "tax/"+d.id();}
-    private Inventory bags(Team team){return team.mule()==null?team.porter().getInventory():team.mule().getInventory();}
-    private void travel(Team team,Location goal){
-        Location here=team.porter().getLocation();
-        double distance=here.distance(goal);
-        if(distance>18){
-            goal=here.clone().add(goal.toVector().subtract(here.toVector()).multiply(14/distance));
-            if(!realm.world.isChunkLoaded(goal.getBlockX()>>4,goal.getBlockZ()>>4))return;
-            goal.setY(realm.world.getHighestBlockYAt(goal,HeightMap.MOTION_BLOCKING_NO_LEAVES)+1);
-        }
-        team.move(goal);
-    }
+    private void travel(Team team,Location goal){team.move(goal);}
     void tick(RealmStore.Depot d,Container stock)throws SQLException{
         var chunk=stock.getChunk();String crewId=crewId(d);
         Team team=realm.crews.team(chunk,crewId);
@@ -62,14 +51,13 @@ final class TaxCouriers implements Listener {
             team=realm.crews.team(chunk,crewId);if(team==null)return;
             team.porter().getPersistentDataContainer().set(station,PersistentDataType.STRING,d.id());
         }
-        var bags=bags(team);
+        var bags=team.bags();
         for(int i=0;i<bags.getSize();i++){
             var box=bags.getItem(i);String id=office.id(box);if(id==null)continue;
             var c=office.ledger.crate(id);
             if(c.received()){bags.setItem(i,null);continue;}
             var bin=office.vault(realm.store.title(c.title()));if(bin==null){team.halt();return;}
             if(!team.near(bin.getLocation().add(.5,.5,.5),23)){
-                if(team.mule()==null && team.porter().getPathfinder().hasPath())return;
                 var goal=yard(bin,team.mule()!=null);if(goal!=null)travel(team,goal);
                 return;
             }
@@ -111,7 +99,7 @@ final class TaxCouriers implements Listener {
         if(!realm.world.isChunkLoaded(d.x(),d.z())){p.sendMessage("产地未加载");return;}
         Team team=realm.crews.team(realm.world.getChunkAt(d.x(),d.z()),crewId(d));
         if(team==null || !team.near(p.getLocation(),36))return;
-        var bags=bags(team);
+        var bags=team.bags();
         for(int i=0;i<bags.getSize();i++){
             var item=bags.getItem(i);String id=office.id(item);if(id==null)continue;
             var c=office.ledger.crate(id);

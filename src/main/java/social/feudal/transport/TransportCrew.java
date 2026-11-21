@@ -1,6 +1,7 @@
 package social.feudal.transport;
 
 import java.util.*;
+import social.feudal.npc.NpcSkins;
 import net.kyori.adventure.text.Component;
 import org.bukkit.*;
 import org.bukkit.block.Block;
@@ -26,33 +27,51 @@ public final class TransportCrew implements Listener {
             throw new IllegalArgumentException("装备可选 speed（步鞋）、pack（背架）或 mule（驮具）");
         }
     }
-    public record Team(Villager porter,Mule mule,int capacity,double speed) {
-        public Mob loadBearer(){return mule==null?porter:mule;}
+    public record Team(Mannequin porter,Mule mule,int capacity,double speed,FootNavigation navigation) {
+        public LivingEntity loadBearer(){return mule==null?porter:mule;}
+        public PorterCargo bags(){return new PorterCargo(porter,mule);}
         public boolean near(Location at,double squared){
             return porter.getLocation().distanceSquared(at)<=squared && loadBearer().getLocation().distanceSquared(at)<=squared;
         }
-        public void move(Location goal){
+        public void move(Location goal){move(goal,goal);}
+        public void move(Location goal,Location packGoal){
             if(mule!=null && porter.getLocation().distanceSquared(mule.getLocation())>16){
-                Mob ahead=porter.getLocation().distanceSquared(goal)<mule.getLocation().distanceSquared(goal)?porter:mule;
-                Mob behind=ahead==porter?mule:porter;
-                ahead.getPathfinder().stopPathfinding();ahead.setAI(false);
-                walk(behind,ahead.getLocation());return;
+                if(porter.getLocation().distanceSquared(goal)<mule.getLocation().distanceSquared(packGoal)){
+                    navigation.stop(porter);walkMule(porter.getLocation());
+                }else{
+                    mule.getPathfinder().stopPathfinding();mule.setAI(false);
+                    navigation.toward(porter,mule.getLocation(),speed);
+                }
+                return;
             }
-            walk(porter,goal);
-            if(mule!=null)walk(mule,goal);
+            navigation.toward(porter,goal,speed);
+            if(mule!=null)walkMule(packGoal);
         }
-        private void walk(Mob mob,Location goal){
-            mob.setAI(true);mob.getPathfinder().moveTo(goal,speed);
+        public void onRoad(Location goal,Location lane){
+            navigation.onRoad(porter,goal,speed);
+            if(mule!=null){
+                if(!mule.hasAI())Bukkit.getMobGoals().removeAllGoals(mule);
+                mule.setAI(true);mule.setCollidable(false);mule.getPathfinder().stopPathfinding();
+                navigation.onRoad(mule,lane,speed);
+            }
+        }
+        private void walkMule(Location goal){
+            if(mule.getLocation().distanceSquared(goal)<.34){
+                mule.getPathfinder().stopPathfinding();mule.setAI(false);return;
+            }
+            if(!mule.hasAI())Bukkit.getMobGoals().removeAllGoals(mule);
+            mule.setAI(true);mule.getPathfinder().moveTo(goal,speed);
         }
         public void halt(){
-            porter.getPathfinder().stopPathfinding();porter.setAI(false);
-            if(mule!=null){mule.getPathfinder().stopPathfinding();mule.setAI(false);}
+            navigation.stop(porter);
+            if(mule!=null){navigation.stop(mule);mule.getPathfinder().stopPathfinding();mule.setAI(false);}
         }
     }
     private final Plugin plugin;
+    private final FootNavigation navigation;
     private final NamespacedKey worker, busy;
     public TransportCrew(Plugin plugin){
-        this.plugin=plugin;worker=key("crew_member");busy=key("crew_busy");
+        this.plugin=plugin;navigation=new FootNavigation(plugin);worker=key("crew_member");busy=key("crew_busy");
         Bukkit.getPluginManager().registerEvents(this,plugin);
     }
     private NamespacedKey key(String name){return new NamespacedKey(plugin,name);}
@@ -70,21 +89,39 @@ public final class TransportCrew implements Listener {
     public boolean registered(Chunk home,String id){return home.getPersistentDataContainer().has(field(id,"porter"));}
     public Team team(Chunk home,String id){
         var data=home.getPersistentDataContainer();
-        var v=find(home.getWorld(),data.get(field(id,"porter"),PersistentDataType.STRING),Villager.class);
+        var roster=field(id,"porter");
+        var resident=find(home.getWorld(),data.get(roster,PersistentDataType.STRING),LivingEntity.class);
+        if(resident instanceof Villager old && id.equals(old.getPersistentDataContainer().get(worker,PersistentDataType.STRING))){
+            // Convert only the recorded 0.4.0 worker at its actual location, carrying its original load.
+            var upgraded=spawn(old.getLocation(),id);
+            old.getPersistentDataContainer().copyTo(upgraded.getPersistentDataContainer(),true);
+            upgraded.customName(old.customName());upgraded.getEquipment().setBoots(old.getEquipment().getBoots());
+            if(id.startsWith("station/"))upgraded.getEquipment().setItemInMainHand(old.getInventory().getItem(0));
+            else{
+                var bag=new PorterCargo(upgraded,null);
+                for(int i=0;i<old.getInventory().getSize();i++)if(old.getInventory().getItem(i)!=null)bag.setItem(i,old.getInventory().getItem(i));
+            }
+            data.set(roster,PersistentDataType.STRING,upgraded.getUniqueId().toString());
+            old.getInventory().clear();old.remove();home.getWorld().save(true);resident=upgraded;
+        }
+        if(!(resident instanceof Mannequin v))return null;
         String animal=data.get(field(id,"mule"),PersistentDataType.STRING);
         Mule m=find(home.getWorld(),animal,Mule.class);
-        if(v==null || (animal!=null && m==null))return null;
-        return new Team(v,m,m!=null?64:data.has(field(id,"pack"))?16:8,data.has(field(id,"speed"))?1.15:.72);
+        if(animal!=null && m==null)return null;
+        return new Team(v,m,m!=null?64:data.has(field(id,"pack"))?16:8,data.has(field(id,"speed"))?1.15:.72,navigation);
     }
     public void staff(Chunk home,String id,String label,Location yard){
         var data=home.getPersistentDataContainer();var roster=field(id,"porter");
         if(data.has(roster) || yard==null)return;
-        var v=home.getWorld().spawn(yard,Villager.class,e->{
-            e.setAdult();e.setAI(false);e.setCollidable(false);e.setInvulnerable(true);e.setPersistenceRequired(true);e.setCanPickupItems(false);
-            e.getPersistentDataContainer().set(worker,PersistentDataType.STRING,id);
-            e.customName(Component.text(label+" · 脚夫"));e.setCustomNameVisible(true);
-        });
+        var v=spawn(yard,id);v.customName(Component.text(label+" · 脚夫"));
         data.set(roster,PersistentDataType.STRING,v.getUniqueId().toString());
+    }
+    private Mannequin spawn(Location at,String id){
+        return at.getWorld().spawn(at,Mannequin.class,e->{
+            e.setImmovable(false);e.setCollidable(false);e.setInvulnerable(true);e.setPersistent(true);
+            e.setDescription(null);e.setCustomNameVisible(true);e.getPersistentDataContainer().set(worker,PersistentDataType.STRING,id);
+            NpcSkins.apply(e,id.startsWith("tax/")?"granary":"freight");
+        });
     }
     public String status(Chunk home,String id){
         var data=home.getPersistentDataContainer();

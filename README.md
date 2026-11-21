@@ -2,9 +2,11 @@
 
 项目名称取自马克·布洛赫（Marc Bloch）的同名著作《封建社会》（La Société féodale）。这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[战略玩法设计与下一轮验收](docs/slg-design.md)
 
-当前可玩版本 **《封建社会》0.4.0** 使用 Paper 26.3 build 257 与 Java 25。普通玩家可查看领界与封契、亲赴税仓、授地任官、处理官印争议，以及谈判帝内王号和独立。管理员使用 `/realm init 在线玩家名` 建国，玩家在游戏中输入 `/realm` 打开图册。
+当前可玩版本 **《封建社会》0.4.1** 使用 Paper 26.3 build 257 与 Java 25。普通玩家可查看领界与封契、亲赴税仓、授地任官、处理官印争议，以及谈判帝内王号和独立。管理员使用 `/realm init 在线玩家名` 建国，玩家在游戏中输入 `/realm` 打开图册。
 
-[下载插件](examples/imperial-atlas/feudal-survey-0.4.0.jar) · [试玩说明](examples/imperial-atlas/试玩说明.md) · [脚夫、驮具与改建实测截图](docs/paper-0.4.0-transport.md)
+[下载插件](examples/imperial-atlas/feudal-survey-0.4.1.jar) · [试玩说明](examples/imperial-atlas/试玩说明.md) · [人形 NPC 与运粮实测截图](docs/paper-0.4.1-people.md)
+
+项目人物使用 Minecraft 原版人形实体 `Mannequin`。首次加入服务器时，接受“封建社会”的资源包即可看到四套原创像素皮肤。税仓、公共货线及封臣驻地各有对应的衣着。右键驻地执事或教士可查当地领地与税权。[人物皮肤源图](assets/npc) · [资源包](examples/imperial-atlas/feudal-people-v1.zip)
 
 旧版勘测与货运仍可在同服使用。[货运实测](docs/paper-0.2.0-freight.md) · [勘测实测](docs/paper-0.1.1-test.md)
 
@@ -45,7 +47,7 @@
 
 ## 构建与安装
 
-使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.4.0.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
+使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.4.1.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
 
 小规模复验可以在全新测试存档首次执行命令前，把初始半径和步长设为 1，最大半径设为 2，并重启服务器。将一项门槛设为 1000000000，可观察首轮四个区块、次轮十二个区块与预算停机。中途暂停并重启，检查状态及坐标保留。默认配置适用于较大规模的预生成实验。
 

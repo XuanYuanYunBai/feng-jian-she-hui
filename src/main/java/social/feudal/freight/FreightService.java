@@ -79,7 +79,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         String reason = e.getMessage() == null ? e.toString() : e.getMessage();
         if (reason.equals(stopped)) return;
         stopped = reason;
-        if (e instanceof IllegalArgumentException) plugin.getLogger().info("货车等候：" + reason);
+        if (e instanceof IllegalArgumentException) plugin.getLogger().info("运输队等候：" + reason);
         else plugin.getLogger().log(Level.SEVERE, "货运操作中止，将从检查点复核", e);
     }
 
@@ -226,7 +226,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             return describe(existing);
         }
         if(store.returning()!=null)throw new IllegalArgumentException("脚夫正在徒步回站");
-        if (store.active() != null) throw new IllegalArgumentException("货车正在履约，请在交付后发车");
+        if (store.active() != null) throw new IllegalArgumentException("已有货单在运，请等待脚夫回站");
         String recipient = main(() -> {
             nearby(sender, r.sx(), r.y(), r.sz());
             if (a.length == 3) return party;
@@ -249,7 +249,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         if (t == null) throw new IllegalArgumentException("货单不存在");
         if (!party.equals("console") && !party.equals(t.recipient())) throw new IllegalArgumentException("仅指定收货人可签收");
         if (t.phase() == Phase.DELIVERED || t.phase() == Phase.UNLOADING) return describe(t);
-        if (t.phase() != Phase.ARRIVED) throw new IllegalArgumentException("货车尚未到站");
+        if (t.phase() != Phase.ARRIVED) throw new IllegalArgumentException("承运脚夫尚未到站");
         main(() -> { nearby(sender, t.route().dx(), t.route().y(), t.route().dz()); return null; });
         store.accept(t, party);
         return "已签收货单 " + t.id() + "，等待卸入终点桶第一格";
@@ -258,7 +258,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     private String status(String[] a) throws SQLException {
         if (a.length > 2) throw new IllegalArgumentException("用法：/freight status [运单号]");
         Trip t = a.length == 1 ? store.active() : store.trip(key(a[1]));
-        return t == null ? (a.length == 1 ? "货车空闲" : "货单不存在") : describe(t);
+        return t == null ? (a.length == 1 ? "脚夫待命" : "货单不存在") : describe(t);
     }
 
     private String describe(Trip t) {

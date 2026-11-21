@@ -10,7 +10,6 @@ import social.feudal.transport.TransportCrew;
 import social.feudal.transport.TransportCrew.Team;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import static social.feudal.freight.FreightStore.*;
@@ -112,8 +111,8 @@ final class FreightRoad {
             if (!loading && slot != null && !slot.isEmpty()) throw new IllegalArgumentException("请清空终点桶第一格");
             Team team=team(r);
             Location dock=location(r,loading?0:r.length());
-            if (!team.near(dock,1.5)){
-                team.move(dock);
+            if (!team.near(dock,4)){
+                team.move(dock,lane(r,dock));
                 throw new IllegalArgumentException("等候脚夫与驮畜到达装卸位");
             }
             if (loading){
@@ -192,20 +191,10 @@ final class FreightRoad {
     }
     String capacity(Route r){return crews.status(home(r),crewId(r.sourceSeal()));}
     private ItemStack cargo(Team team){
-        if(team.mule()!=null)return team.mule().getInventory().getItem(2);
-        var box=team.porter().getInventory().getItem(0);
-        if(box==null || !(box.getItemMeta() instanceof BlockStateMeta meta) || !(meta.getBlockState() instanceof Barrel barrel))return null;
-        return barrel.getSnapshotInventory().getItem(0);
+        return team.bags().getItem(team.mule()==null?0:2);
     }
     private void putCargo(Team team,ItemStack stack){
-        if(team.mule()!=null){team.mule().getInventory().setItem(2,stack);return;}
-        ItemStack box=null;
-        if(stack!=null){
-            box=new ItemStack(Material.BARREL);
-            var meta=(BlockStateMeta)box.getItemMeta();var barrel=(Barrel)meta.getBlockState();
-            barrel.getSnapshotInventory().setItem(0,stack);meta.setBlockState(barrel);box.setItemMeta(meta);
-        }
-        team.porter().getInventory().setItem(0,box);
+        team.bags().setItem(team.mule()==null?0:2,stack);
     }
     private NamespacedKey field(Route r,String name){return new NamespacedKey(plugin,"freight/"+r.sourceSeal()+"/"+name);}
     private void carry(Team team,Trip t,ItemStack stack){
@@ -217,10 +206,15 @@ final class FreightRoad {
         team.porter().getPersistentDataContainer().set(consignment,PersistentDataType.STRING,t.id());
         crews.active(team,true);
     }
+    private Location lane(Route r,Location goal){
+        return goal.clone().add(r.sx()==r.dx()?.60:0,0,r.sz()==r.dz()?.60:0);
+    }
     boolean walk(Route r,Team team,int step){
         Location goal=location(r,step);
-        if(team.near(goal,.48)){team.halt();return true;}
-        team.move(goal);return false;
+        Location packGoal=lane(r,goal);
+        boolean animalReady=team.mule()==null || team.mule().getLocation().distanceSquared(packGoal)<2.25;
+        if(team.porter().getLocation().distanceSquared(goal)<.48 && animalReady){team.halt();return true;}
+        team.onRoad(goal,packGoal);return false;
     }
     boolean readyToCarry(Trip t){
         Route r=t.route();

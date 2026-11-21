@@ -37,7 +37,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         taxes=new TaxOffice(this);
         council=new Council(this);
         if(store.ready()) restoreMap();
-        markers=new DepotMarkers(this);
+        markers=new DepotMarkers(this);new SeatEnvoys(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
     private void restoreMap() throws SQLException {
