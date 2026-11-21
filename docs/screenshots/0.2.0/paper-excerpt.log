@@ -1,0 +1,6 @@
+[17:09:01 INFO]: [FeudalSurvey] 货车等候：缺少连续路面 1,62,1
+[17:09:01 INFO]: first-grain | riverbend | 在途 | 24 小麦 | (0,63,0) | 14/28 | 等候：缺少连续路面 1,62,1
+[17:09:01 INFO]: System chat: 14, 62, 0 has the following block data: []
+[17:09:09 INFO]: [FeudalSurvey] 货单 first-grain 已交付
+[17:09:09 INFO]: System chat: 14, 62, 0 has the following block data: [{Slot: 0b, id: "minecraft:wheat", count: 24}]
+[17:09:09 INFO]: first-grain | riverbend | 已交付 | 24 小麦 | (14,63,0) | 28/28 | 签收人 ae181540-b122-3442-b780-7d9fed2d3f2c | 2026-11-21 17:09:09 UTC
