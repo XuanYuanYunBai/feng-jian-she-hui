@@ -54,8 +54,9 @@ public final class SurveyPlugin extends JavaPlugin {
             if (legacy) getLogger().info("0.1.0 勘测记录已归档，按原中心复核。暂停状态请使用 /survey resume");
             if (progress != null && progress.ring().outer() > limit)
                 throw new IllegalArgumentException("预算低于已登记半径，请恢复 max-radius");
-            realm = new RealmService(this, world, getDataFolder().toPath().resolve("realm.sqlite"));
-            freight = new FreightService(this, world, getDataFolder().toPath().resolve("freight.sqlite"));
+            var crews = new social.feudal.transport.TransportCrew(this);
+            realm = new RealmService(this, world, getDataFolder().toPath().resolve("realm.sqlite"), crews);
+            freight = new FreightService(this, world, getDataFolder().toPath().resolve("freight.sqlite"), crews);
             getServer().getScheduler().runTaskTimer(this, this::tick, 1L, ticks);
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "勘测初始化失败", e);

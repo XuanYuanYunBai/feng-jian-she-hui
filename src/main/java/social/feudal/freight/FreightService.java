@@ -39,9 +39,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     private String delayedTrip = "";
     private final boolean pauseWhenEmpty;
 
-    public FreightService(JavaPlugin plugin, World world, Path db) throws SQLException {
+    public FreightService(JavaPlugin plugin, World world, Path db,social.feudal.transport.TransportCrew crews) throws SQLException {
         this.plugin = plugin;
-        road = new FreightRoad(plugin, world);
+        road = new FreightRoad(plugin, world,crews);
         store = new FreightStore(db);
         pauseWhenEmpty = plugin.getConfig().getBoolean("freight.pause-when-empty", true);
         plugin.getCommand("freight").setExecutor(this);
@@ -51,13 +51,15 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             if (!ticking.compareAndSet(false, true)) return;
             ledger.execute(() -> {
                 try {
+                    var returning=store.returning();
+                    if(returning!=null){returnHome(returning);return;}
                     Trip t = store.active();
                     if (t != null) tick(t);
                 } catch (Exception e) {
                     if (!closing) noteFailure(e);
                 } finally { ticking.set(false); }
             });
-        }, 1, 10);
+        }, 1, 4);
     }
 
     private <T> T main(Callable<T> work) throws Exception {
@@ -81,20 +83,33 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         else plugin.getLogger().log(Level.SEVERE, "货运操作中止，将从检查点复核", e);
     }
 
+    private void returnHome(FreightStore.Return trip)throws Exception{
+        var r=trip.route();int next=Math.max(0,trip.step()-1);
+        if(main(()->{
+            road.hold(r,trip.step(),next);road.inspect(r,next);
+            var team=road.team(r);
+            if(!road.walk(r,team,next))return false;
+            if(next==0){road.rested(team);road.release();}
+            return true;
+        }))store.walkedBack(trip);
+    }
+
     private void tick(Trip t) throws Exception {
         delayedTrip = t.id();
         Route r = t.route();
         int next = t.phase() == Phase.TRAVEL ? t.step() + 1 : t.step();
         boolean ready = main(() -> {
+            if(t.phase()!=Phase.LOADING && !road.readyToCarry(t))return false;
             road.hold(r, t.step(), next);
             switch (t.phase()) {
                 case LOADING -> { return road.transfer(t, true); }
                 case TRAVEL -> {
-                    road.show(t, t.step());
                     road.inspect(r, t.step());
                     road.inspect(r, next);
+                    var team=road.team(r);
+                    return road.walk(r,team,next);
                 }
-                case ARRIVED -> road.show(t, t.step());
+                case ARRIVED -> road.team(r).halt();
                 case UNLOADING -> road.transfer(t, false);
                 case DELIVERED, CANCELLED -> throw new IllegalStateException("已结束的货单进入运输队列");
             }
@@ -109,15 +124,16 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 }
             }
             case TRAVEL -> {
+                if(!ready)return;
                 store.move(t);
                 main(() -> {
-                    road.show(t, next);
                     if (next == r.length()) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.y()
                             + "," + r.dz() + "，请到站空手潜行右键签收");
                     return null;
                 });
             }
             case UNLOADING -> {
+                if(!ready)return;
                 store.delivered(t);
                 main(() -> { road.release(); return null; });
                 plugin.getLogger().info("货单 " + t.id() + " 已交付");
@@ -148,6 +164,11 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 message = switch (action) {
                     case "route" -> register(args);
                     case "routes" -> listRoutes();
+                    case "equip" -> {
+                        if(!(sender instanceof Player p) || args.length!=3)throw new IllegalArgumentException("用法 /freight equip 货线 speed|pack|mule");
+                        Route r=store.route(key(args[1]));if(r==null)throw new IllegalArgumentException("货线不存在");
+                        main(()->{road.equip(p,r,args[2]);return null;});yield "货站装备已登记";
+                    }
                     case "send" -> book(sender, party, args);
                     case "accept" -> accept(sender, party, args);
                     case "status" -> status(args);
@@ -204,6 +225,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             if (!existing.route().equals(r) || !existing.sender().equals(party)) throw new IllegalArgumentException("该运单号已占用");
             return describe(existing);
         }
+        if(store.returning()!=null)throw new IllegalArgumentException("脚夫正在徒步回站");
         if (store.active() != null) throw new IllegalArgumentException("货车正在履约，请在交付后发车");
         String recipient = main(() -> {
             nearby(sender, r.sx(), r.y(), r.sz());
@@ -288,6 +310,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                     for (Route r : routes) {
                         if (!r.world().equals(world) || y!=r.y()) continue;
                         if (x==r.sx() && z==r.sz()) {
+                            body.add(text(road.capacity(r)));
+                            for(var u:social.feudal.transport.TransportCrew.Upgrade.values())
+                                buttons.add(command(u.name+" · "+u.cost,"freight equip "+r.name()+" "+u.name().toLowerCase(Locale.ROOT)));
                             String bill = UUID.randomUUID().toString();
                             if(inputs.isEmpty()) inputs.add(DialogInput.text("recipient",200,Component.text("收货人（留空为本人）"),true,"",16,null));
                             var action = DialogAction.customClick((reply, viewer) -> {

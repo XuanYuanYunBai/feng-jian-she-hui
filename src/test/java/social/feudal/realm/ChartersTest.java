@@ -17,8 +17,8 @@ class ChartersTest {
         assertThrows(IllegalArgumentException.class,()->c.grant("b","count","伯爵","bad","bad","c",b,false));
         c.estate("b","count","庄园","farm","渡口庄园","fam",f.depot("ford"));
         assertEquals("count",s.owner(7,0));assertEquals("farm",f.right(f.depot("ford")));
-        assertThrows(IllegalArgumentException.class,()->f.collect("ford",1,"rex"));
-        assertEquals("farm",f.collect("ford",1,"fam").title());
+        assertThrows(IllegalArgumentException.class,()->f.collectRight(f.depot("ford"),"rex"));
+        assertEquals("farm",f.collectRight(f.depot("ford"),"fam"));
     }
  }
  @Test void governorCannotGrowAndCapIsShared()throws Exception{

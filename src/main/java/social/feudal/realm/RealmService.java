@@ -22,15 +22,18 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final Council council;
     final CharterOffice charters;
     final DepotMarkers markers;
+    final WarehouseFixtures fixtures;
     final TaxOffice taxes;
+    final social.feudal.transport.TransportCrew crews;
     private MapView view;
     private PoliticalMap renderer;
 
-    public RealmService(JavaPlugin plugin,World world,Path path) throws SQLException {
-        this.plugin=plugin;this.world=world;store=new RealmStore(path);
+    public RealmService(JavaPlugin plugin,World world,Path path,social.feudal.transport.TransportCrew crews) throws SQLException {
+        this.crews=crews;this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
         dialogs=new RealmDialogs(this);
         charters=new CharterOffice(this);
+        fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);
         if(store.ready()) restoreMap();
@@ -70,6 +73,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             if(action.equals("help")){
                 s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
+                s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
                 s.sendMessage("/realm acts 查文书 · heir 提名 · vacate 交位 · appoint 任命 · yield 交印 · resist 抗命");
                 s.sendMessage("/realm support 联署 · petition 请袭 · confirm 准袭 · offer 拟约 · ratify 签署");
@@ -87,6 +91,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             switch(action){
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
+                case "equip" -> {usage(a.length==3,"equip 税仓ID speed|pack|mule");taxes.couriers.equip(player(s),taxes.ledger.depot(a[1]),a[2]);}
+                case "crew" -> {usage(a.length==2,"crew 税仓ID");dialogs.crew(player(s),taxes.ledger.depot(a[1]));}
+                case "desk","stock","vault" -> {usage(a.length==2,action+" 登记代号");fixtures.register(player(s),action,a[1]);}
                 case "visit","ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> {
                     if(s instanceof Player p)dialogs.directory(p,a.length==2?Integer.parseInt(a[1]):1);
@@ -122,6 +129,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                     markers.refresh();s.sendMessage("税仓已登记，下个税期开始入账");
                     markers.complete(taxes.ledger.depot(a[1]));
                 }
+                case "fixtures" -> {usage(a.length==2,"fixtures 税仓ID");dialogs.fixtures(player(s),taxes.ledger.depot(a[1]));}
                 case "build" -> {
                     var p=player(s);inWorld(p);var chunk=p.getLocation().getChunk();
                     var d=store.depots().stream().filter(row->row.x()==chunk.getX() && row.z()==chunk.getZ()).findFirst()
@@ -132,7 +140,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 }
                 case "depots" -> {
                     for(var d:store.depots()){
-                        if(world.isChunkLoaded(d.x(),d.z()) && markers.built(d)){
+                        if(world.isChunkLoaded(d.x(),d.z()) && markers.counter(d.x(),d.z())!=null){
                             var desk=markers.counter(d.x(),d.z());
                             s.sendMessage(d.name()+" · 账台 "+desk.getBlockX()+"，"+desk.getBlockY()+"，"+desk.getBlockZ()+" · "+d.id());
                         }else s.sendMessage(d.name()+" · 所在区块 "+d.x()+"，"+d.z()+" · "+d.id());

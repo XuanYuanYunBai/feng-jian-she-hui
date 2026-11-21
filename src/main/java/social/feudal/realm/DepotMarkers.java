@@ -36,15 +36,16 @@ final class DepotMarkers implements Listener {
         return xyz==null?null:new Storehouse.Site(xyz[0],xyz[1],xyz[2]);
     }
     Location counter(int x,int z){
-        var w=realm.world;
-        var s=existing(w.getChunkAt(x,z));
-        if(s!=null)return s.counter(w);
-        int bx=x*16+8,bz=z*16+8;
-        return new Location(w,bx,w.getHighestBlockYAt(bx,bz,HeightMap.MOTION_BLOCKING_NO_LEAVES)+1,bz);
+        for(var d:depots)if(d.x()==x && d.z()==z){
+            Block desk=realm.fixtures.lookup(x,z,"desk",d.id());
+            return desk==null?null:desk.getLocation();
+        }
+        return null;
     }
     private void mark(Chunk chunk,RealmStore.Depot d){
         var site=existing(chunk);
         if(site==null){
+            if(realm.fixtures.custom(chunk,d.id()))return;
             site=Storehouse.find(chunk,d.id().equals("mill"));
             if(site==null)return; // Leave occupied sites and their old markers intact.
             Storehouse.build(realm.world,site,d);
@@ -53,13 +54,15 @@ final class DepotMarkers implements Listener {
             desk.update();
             chunk.getPersistentDataContainer().set(siteKey,PersistentDataType.INTEGER_ARRAY,new int[]{site.x(),site.floor(),site.z()});
         }
+        try{realm.fixtures.starter(chunk,site,d);}catch(SQLException ex){throw new IllegalStateException(ex);}
         for(var e:chunk.getEntities()){
             String id=e.getPersistentDataContainer().get(marker,PersistentDataType.STRING);
             if(d.id().equals(id) || (d.id()+".touch").equals(id) || (d.id()+".label").equals(id))e.remove();
         }
     }
     boolean built(RealmStore.Depot d){
-        return existing(realm.world.getChunkAt(d.x(),d.z()))!=null;
+        var chunk=realm.world.getChunkAt(d.x(),d.z());
+        return existing(chunk)!=null || realm.fixtures.custom(chunk,d.id());
     }
     void complete(RealmStore.Depot d){
         mark(realm.world.getChunkAt(d.x(),d.z()),d);
@@ -75,11 +78,10 @@ final class DepotMarkers implements Listener {
         if(e.getHand()!=EquipmentSlot.HAND || !e.getAction().isRightClick())return;
         Block block=e.getClickedBlock();
         if(block!=null && block.getType()==Material.LECTERN){
-            var desk=(Lectern)block.getState();
-            String id=desk.getPersistentDataContainer().get(marker,PersistentDataType.STRING);
-            if(id!=null && realm.world.equals(block.getWorld())){
-                e.setCancelled(true);realm.dialogs.accounts(e.getPlayer(),realm.taxes.ledger.period(),id);return;
-            }
+            if(block.getWorld().equals(realm.world))for(var d:depots)
+                if(block.equals(realm.fixtures.lookup(block.getX()>>4,block.getZ()>>4,"desk",d.id()))){
+                    e.setCancelled(true);realm.dialogs.accounts(e.getPlayer(),realm.taxes.ledger.period(),d.id());return;
+                }
         }
         if(block!=null && block.getWorld().equals(realm.world) && block.getType()==Material.DARK_OAK_WALL_SIGN){
             var site=existing(block.getChunk());

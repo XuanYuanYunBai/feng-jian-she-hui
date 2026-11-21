@@ -25,7 +25,7 @@ class SuccessionTest {
             assertEquals("official",s.title("march").lawful());assertEquals(HEIR,s.title("march").seal());
             assertThrows(IllegalArgumentException.class,()->v.seal("march","official",true));
             v.seal("march",HEIR,true);assertEquals("official",s.title("march").seal());
-            assertEquals(16,f.balance("march"));assertEquals(0,f.balance("estate"));
+            assertEquals("march",f.account("east",1).title());assertEquals("estate",f.right(f.depot("east")));
         }
     }
     @Test void hereditaryConfirmationAndBilateralKingdomTreaties()throws Exception{

@@ -6,9 +6,11 @@ import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import org.bukkit.*;
 import org.bukkit.block.*;
-import org.bukkit.entity.Display;
-import org.bukkit.entity.ItemDisplay;
+import social.feudal.transport.TransportCrew;
+import social.feudal.transport.TransportCrew.Team;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import static social.feudal.freight.FreightStore.*;
@@ -21,10 +23,11 @@ final class FreightRoad {
     private final Plugin plugin;
     private final NamespacedKey station, receipt;
     private final Set<Cell> tickets = new HashSet<>();
-    private ItemDisplay cart;
-    private String visibleTrip;
+    private final TransportCrew crews;
+    private final NamespacedKey consignment;
 
-    FreightRoad(Plugin plugin, World world) {
+    FreightRoad(Plugin plugin, World world,TransportCrew crews) {
+        this.crews=crews;consignment=new NamespacedKey(plugin,"consignment");
         this.plugin = plugin;
         this.world = world;
         station = new NamespacedKey(plugin, "freight_station");
@@ -44,6 +47,7 @@ final class FreightRoad {
         var source = barrel(r.sx(), r.y(), r.sz(), null);
         var dest = barrel(r.dx(), r.y(), r.dz(), null);
         String a = seal(source), b = seal(dest);
+        staff(r,a);
         world.save(true);
         return new Route(name, r.world(), sx, y, sz, dx, dz, a, b);
     }
@@ -87,6 +91,8 @@ final class FreightRoad {
         if (stack == null || !Set.of(Material.WHEAT, Material.WHITE_WOOL, Material.OAK_LOG).contains(stack.getType())
                 || stack.getAmount() < 1 || stack.getAmount() > 64)
             throw new IllegalArgumentException("请将 1–64 件小麦、白色羊毛或橡木原木放入起点桶第一格");
+        Team team=team(r);
+        if(stack.getAmount()>team.capacity())throw new IllegalArgumentException("本队每趟上限 "+team.capacity()+" 件，请分批或在起点升级装备");
         world.save(true);
         return new Goods(stack.serializeAsBytes(), stack.getType().name(), stack.getAmount());
     }
@@ -104,6 +110,19 @@ final class FreightRoad {
             ItemStack slot = inventory.getItem(0);
             if (loading && !original.equals(slot)) return false;
             if (!loading && slot != null && !slot.isEmpty()) throw new IllegalArgumentException("请清空终点桶第一格");
+            Team team=team(r);
+            Location dock=location(r,loading?0:r.length());
+            if (!team.near(dock,1.5)){
+                team.move(dock);
+                throw new IllegalArgumentException("等候脚夫与驮畜到达装卸位");
+            }
+            if (loading){
+                if(t.amount()>team.capacity())throw new IllegalArgumentException("货物超过运力，请装备脚夫");
+                carry(team,t,original);
+            }else{
+                if(!original.equals(cargo(team)))throw new IllegalArgumentException("等待原货抵站");
+                original=cargo(team);putCargo(team,null);
+            }
             inventory.setItem(0, loading ? null : original);
             b.getPersistentDataContainer().set(receipt, PersistentDataType.STRING, mark);
             if (!b.update()) throw new IllegalStateException("站桶更新失败");
@@ -113,7 +132,7 @@ final class FreightRoad {
     }
 
     private Location location(Route r, int step) {
-        return new Location(world, r.x(step) + 0.5, r.y() + 1.4, r.z(step) + 0.5);
+        return new Location(world, r.x(step) + 0.5, r.y() + 1.0, r.z(step) + 0.5);
     }
 
     // At most two adjacent road cross-sections, covering up to four chunks.
@@ -156,26 +175,78 @@ final class FreightRoad {
         }
     }
 
-    void show(Trip trip, int step) {
-        Location at = location(trip.route(), step);
-        if (cart == null || !cart.isValid() || !trip.id().equals(visibleTrip)) {
-            if (cart != null) cart.remove();
-            cart = world.spawn(at, ItemDisplay.class, e -> {
-                e.setItemStack(new ItemStack(Material.CHEST_MINECART));
-                e.setBillboard(Display.Billboard.VERTICAL);
-                e.setPersistent(false);
-                e.setTeleportDuration(5);
-                e.customName(Component.text("货车 " + trip.id() + " · " + trip.amount() + " " + goodsName(trip.material())));
-                e.setCustomNameVisible(true);
-            });
-            visibleTrip = trip.id();
-        } else if (cart.getLocation().distanceSquared(at) > 0.01) {
-            cart.teleport(at);
-        }
+    private String crewId(String seal){return "station/"+seal;}
+    private Chunk home(Route r){return world.getChunkAt(r.sx()>>4,r.sz()>>4);}
+    private void staff(Route r,String seal){
+        crews.staff(home(r),crewId(seal),"货站",location(r,0));
     }
-
+    Team team(Route r){
+        staff(r,r.sourceSeal());
+        Team team=crews.team(home(r),crewId(r.sourceSeal()));
+        if(team==null)throw new IllegalArgumentException("等待登记脚夫与驮畜所在区块加载");
+        return team;
+    }
+    void equip(Player p,Route r,String kind){
+        team(r);
+        crews.equip(p,barrel(r.sx(),r.y(),r.sz(),r.sourceSeal()).getBlock(),crewId(r.sourceSeal()),TransportCrew.Upgrade.parse(kind));
+    }
+    String capacity(Route r){return crews.status(home(r),crewId(r.sourceSeal()));}
+    private ItemStack cargo(Team team){
+        if(team.mule()!=null)return team.mule().getInventory().getItem(2);
+        var box=team.porter().getInventory().getItem(0);
+        if(box==null || !(box.getItemMeta() instanceof BlockStateMeta meta) || !(meta.getBlockState() instanceof Barrel barrel))return null;
+        return barrel.getSnapshotInventory().getItem(0);
+    }
+    private void putCargo(Team team,ItemStack stack){
+        if(team.mule()!=null){team.mule().getInventory().setItem(2,stack);return;}
+        ItemStack box=null;
+        if(stack!=null){
+            box=new ItemStack(Material.BARREL);
+            var meta=(BlockStateMeta)box.getItemMeta();var barrel=(Barrel)meta.getBlockState();
+            barrel.getSnapshotInventory().setItem(0,stack);meta.setBlockState(barrel);box.setItemMeta(meta);
+        }
+        team.porter().getInventory().setItem(0,box);
+    }
+    private NamespacedKey field(Route r,String name){return new NamespacedKey(plugin,"freight/"+r.sourceSeal()+"/"+name);}
+    private void carry(Team team,Trip t,ItemStack stack){
+        var data=home(t.route()).getPersistentDataContainer();
+        data.set(field(t.route(),"bill"),PersistentDataType.STRING,t.id());
+        data.remove(field(t.route(),"approach"));
+        putCargo(team,stack);
+        team.porter().customName(Component.text("货站脚夫 · "+goodsName(t.material())+" ×"+t.amount()));
+        team.porter().getPersistentDataContainer().set(consignment,PersistentDataType.STRING,t.id());
+        crews.active(team,true);
+    }
+    boolean walk(Route r,Team team,int step){
+        Location goal=location(r,step);
+        if(team.near(goal,.48)){team.halt();return true;}
+        team.move(goal);return false;
+    }
+    boolean readyToCarry(Trip t){
+        Route r=t.route();
+        var data=home(r).getPersistentDataContainer();
+        if(t.id().equals(data.get(field(r,"bill"),PersistentDataType.STRING)))return true;
+        // Older versions kept cargo in the freight manifest. The worker must collect it at the saved road position.
+        if(t.phase()==Phase.UNLOADING){
+            var dest=barrel(r.dx(),r.y(),r.dz(),r.destSeal());
+            if(("deliver/"+t.id()).equals(dest.getPersistentDataContainer().get(receipt,PersistentDataType.STRING)))return true;
+        }
+        int step=Math.min(t.step(),data.getOrDefault(field(r,"approach"),PersistentDataType.INTEGER,0));
+        int next=Math.min(t.step(),step+1);
+        hold(r,step,next);
+        var team=team(r);
+        if(t.id().equals(team.porter().getPersistentDataContainer().get(consignment,PersistentDataType.STRING))){
+            data.set(field(r,"bill"),PersistentDataType.STRING,t.id());return true;
+        }
+        if(t.amount()>team.capacity())throw new IllegalArgumentException("请先在起点为旧运单配足运力");
+        inspect(r,step);inspect(r,next);
+        if(!walk(r,team,next))return false;
+        data.set(field(r,"approach"),PersistentDataType.INTEGER,next);
+        if(next<t.step())return false;
+        carry(team,t,ItemStack.deserializeBytes(t.cargo()));world.save(true);return true;
+    }
+    void rested(Team team){crews.active(team,false);team.halt();team.porter().customName(Component.text("货站 · 脚夫"));}
     void release() {
-        if (cart != null) { cart.remove(); cart = null; }
         for (var c : tickets) world.removePluginChunkTicket(c.x, c.z, plugin);
         tickets.clear();
     }

@@ -41,6 +41,7 @@ final class FreightStore implements AutoCloseable {
                     phase TEXT NOT NULL CHECK(phase IN ('LOADING','TRAVEL','ARRIVED','UNLOADING','DELIVERED','CANCELLED')),
                     step INTEGER NOT NULL DEFAULT 0, signer TEXT, delivered_at TEXT)
                     """);
+            st.execute("CREATE TABLE IF NOT EXISTS crew_return(route TEXT PRIMARY KEY REFERENCES routes(name),step INTEGER NOT NULL)");
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_cart ON trips((1)) WHERE phase NOT IN ('DELIVERED','CANCELLED')");
         } catch (SQLException e) { db.close(); throw e; }
     }
@@ -111,7 +112,25 @@ final class FreightStore implements AutoCloseable {
     }
 
     void accept(Trip t, String signer) throws SQLException { transition(t, Phase.ARRIVED, Phase.UNLOADING, t.step, signer); }
-    void delivered(Trip t) throws SQLException { transition(t, Phase.UNLOADING, Phase.DELIVERED, t.step, t.signer); }
+    void delivered(Trip t)throws SQLException{
+        db.setAutoCommit(false);
+        try(var q=db.prepareStatement("INSERT INTO crew_return VALUES(?,?)")){
+            transition(t,Phase.UNLOADING,Phase.DELIVERED,t.step,t.signer);
+            q.setString(1,t.route.name);q.setInt(2,t.step);q.executeUpdate();db.commit();
+        }catch(SQLException | RuntimeException ex){db.rollback();throw ex;}
+        finally{db.setAutoCommit(true);}
+    }
+    record Return(Route route,int step){}
+    Return returning()throws SQLException{
+        try(var q=db.prepareStatement("SELECT route,step FROM crew_return LIMIT 1");var r=q.executeQuery()){
+            return r.next()?new Return(route(r.getString(1)),r.getInt(2)):null;
+        }
+    }
+    void walkedBack(Return trip)throws SQLException{
+        try(var q=db.prepareStatement(trip.step<=1?"DELETE FROM crew_return WHERE route=?":"UPDATE crew_return SET step=step-1 WHERE route=?")){
+            q.setString(1,trip.route.name);q.executeUpdate();
+        }
+    }
 
     private void transition(Trip t, Phase from, Phase to, int step, String signer) throws SQLException {
         if (t.phase != from) throw new IllegalStateException("货单状态不符");

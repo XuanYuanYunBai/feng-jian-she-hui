@@ -41,10 +41,31 @@ final class RealmDialogs {
         var body = List.of(text(t.rank() + "　·　" + t.charter()), text("所属国家　" + s.polity(t.id()) + "\n直属上级　" + parent),
                 text("法定任命　" + realm.display(t.lawful()) + "\n实际持印　" + realm.display(t.seal())),
                 text("驻地区块　" + t.x() + "，" + t.z() + "　｜　直辖 " + s.number("SELECT count(*) FROM land WHERE title=?",t.id()) + " 区块"),
-                text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + realm.taxes.ledger.balance(t.id()) + " 份"));
+                text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + realm.taxes.balance(t)));
         show(p, t.name(), body, List.of(), List.of(command("返回纹章院", "realm atlas"), command("查阅税仓", "realm accounts")), 2);
     }
 
+    void crew(Player p,RealmStore.Depot d)throws SQLException{
+        var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();
+        if(realm.world.isChunkLoaded(d.x(),d.z()))body.add(text(realm.crews.status(realm.world.getChunkAt(d.x(),d.z()),TaxCouriers.crewId(d))));
+        body.add(text("脚夫送粮后步行回仓。请在仓边交付装备。"));
+        body.add(text("步鞋　皮革靴 ×1，加快步速\n背架　皮革 ×4、木棍 ×4，每趟增至 16 份\n驮具　箱子、拴绳、鞍各 ×1，每趟增至 64 份"));
+        body.add(text("先配背架，再瞄准亲自带来的成年驯骡登记。"));
+        for(var u:social.feudal.transport.TransportCrew.Upgrade.values())
+            buttons.add(command("配备"+u.name,"realm equip "+d.id()+" "+u.name().toLowerCase(Locale.ROOT)));
+        buttons.add(command("返回账簿","realm accounts "+d.id()));
+        show(p,"仓务人手 · "+d.name(),body,List.of(),buttons,2);
+    }
+    void fixtures(Player p,RealmStore.Depot d)throws SQLException{
+        var buttons=new ArrayList<ActionButton>();
+        buttons.add(command("登记瞄准的讲台","realm desk "+d.id()));
+        buttons.add(command("登记产地箱或桶","realm stock "+d.id()));
+        for(var t:realm.store.titles())if(t.x()==d.x() && t.z()==d.z() && (t.seal().equals(p.getUniqueId().toString()) || p.hasPermission("feudal.realm.admin")))
+            buttons.add(command("登记公库 · "+t.name(),"realm vault "+t.id()));
+        buttons.add(command("返回账簿","realm accounts "+d.id()));
+        show(p,"税仓改建 · "+d.name(),List.of(text("在本区块放好新的讲台、箱子或木桶。瞄准方块后选择用途。"),
+                text("登记后旧址立即停用，原箱中的物资需自行搬运。请为脚夫和驮队留出装卸场和通路。")),List.of(),buttons,2);
+    }
     void warehouses(Player p, int period, int page) throws SQLException {
         var depots = realm.store.depots();
         int count = pageCount(depots.size());
@@ -68,12 +89,19 @@ final class RealmDialogs {
             body.add(text("本期尚无应收记录"));
         } else {
             var a = f.account(id,period);
-            body.add(text("应收小麦　" + a.due() + " 份　｜　尚待征收　" + a.remaining() + " 份"));
-            body.add(text("自动入库　" + a.automatic() + " 份\n亲征装箱　" + a.packed() + " 份"));
-            body.add(text("期初税权　" + realm.store.title(a.title()).name()));
-            if (a.remaining()>0) buttons.add(command("在此亲征", "realm collect " + id + " " + period));
+            int received=realm.store.number("SELECT sum(amount) FROM crate WHERE depot=? AND period=? AND received=1",id,period);
+            body.add(text("应收小麦　"+a.due()+" 份　｜　税箱已交割　"+received+" 份"));
+            body.add(text("本期可委托驮运　"+f.quota(id,period)+" 份　｜　尚待装箱　"+a.remaining()+" 份"));
+            body.add(text("期初税权　"+realm.store.title(a.title()).name()+"\n持印人可在发运前提走本地全部税箱。"));
+            buttons.add(command("从本仓提运","realm collect "+id+" "+period));
         }
+        var stock=realm.fixtures.lookup(d.x(),d.z(),"stock",id);
+        if(stock!=null)body.add(text("产地仓箱　"+stock.getX()+"，"+stock.getY()+"，"+stock.getZ()));
+        var owner=realm.store.title(realm.store.owner(d.x(),d.z()));
+        if(owner.seal().equals(p.getUniqueId().toString()) || p.hasPermission("feudal.realm.admin"))
+            buttons.add(command("改建登记","realm fixtures "+id));
         if (realm.taxes.holdsCrate(p)) buttons.add(command("交付手中税箱", "realm deposit"));
+        buttons.add(command("脚夫与装备","realm crew "+id));
         buttons.add(command("返回税仓总册", "realm warehouses " + period + " 1"));
         show(p, d.name(), body, List.of(), buttons, 2);
     }

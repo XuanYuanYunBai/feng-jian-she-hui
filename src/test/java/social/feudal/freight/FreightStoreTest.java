@@ -64,6 +64,9 @@ class FreightStoreTest {
             db.delivered(unloading);
             assertThrows(SQLException.class, () -> db.delivered(unloading));
             assertNull(db.active());
+            assertEquals(2,db.returning().step());
+            db.walkedBack(db.returning());assertEquals(1,db.returning().step());
+            db.walkedBack(db.returning());assertNull(db.returning());
             Trip receipt = db.trip("one");
             assertEquals(17, receipt.amount());
             assertEquals(Phase.DELIVERED, receipt.phase());
