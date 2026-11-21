@@ -35,6 +35,6 @@ final class CharterOffice {
             }
             default -> throw new IllegalArgumentException("未知授封操作");
         }
-        realm.changed();
+        realm.council.succession.sync();realm.changed();
     }
 }

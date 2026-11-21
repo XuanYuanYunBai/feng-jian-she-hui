@@ -19,6 +19,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final JavaPlugin plugin;
     final World world;
     final RealmStore store;
+    final Council council;
     final CharterOffice charters;
     final TaxOffice taxes;
     private MapView view;
@@ -29,6 +30,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         store.checkWorld(world.getUID().toString());
         charters=new CharterOffice(this);
         taxes=new TaxOffice(this);
+        council=new Council(this);
         if(store.ready()) restoreMap();
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
@@ -65,6 +67,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
+                s.sendMessage("/realm acts 查文书 · heir 提名 · vacate 交位 · appoint 任命 · yield 交印 · resist 抗命");
+                s.sendMessage("/realm support 联署 · petition 请袭 · confirm 准袭 · offer 拟约 · ratify 签署");
                 s.sendMessage("管理员 /realm init 在线君主名  以主世界出生区块建立帝国");
                 return true;
             }
@@ -73,10 +77,11 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 usage(a.length==2,"init 在线君主名");
                 var l=world.getSpawnLocation();
                 store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,actor(a[1]));
-                taxes.ledger.begin(1);restoreMap();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
+                council.succession.sync();taxes.ledger.begin(1);restoreMap();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "acts","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> atlas(s);
