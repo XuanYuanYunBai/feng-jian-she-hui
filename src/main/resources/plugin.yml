@@ -1,0 +1,14 @@
+name: FeudalSurvey
+main: social.feudal.survey.SurveyPlugin
+version: '0.1.0'
+api-version: '26.3'
+description: 封建社会 · 主世界资源勘测
+commands:
+  survey:
+    description: 查看主世界勘测进度，启动、暂停或继续勘测
+    usage: /survey <start|status|pause|resume>
+    permission: feudal.survey.admin
+permissions:
+  feudal.survey.admin:
+    description: 管理开服勘测与查看矿产统计
+    default: op

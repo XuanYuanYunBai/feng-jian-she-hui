@@ -1,0 +1,10 @@
+# 单位为区块。每次只处理一个快照。达到预算仍有缺项则停下并保留数据。
+initial-radius: 128
+ring-step: 32
+max-radius: 256
+ticks-between-chunks: 2
+# 原型门槛，单位为实际方块数。由独立区块快照统计。
+minimum-blocks:
+  iron: 4096
+  copper: 2048
+  gold: 512
