@@ -21,4 +21,6 @@
 
 ![原版人形脚夫与载有整组小麦的驮骡](screenshots/0.4.1/caravan.png)
 
+在东境伯领，玩家在仓房门前右键驻地执事。弹出的中文档案显示实际持印人为东境伯家、直辖 256 区块，并列出驻地税权与公库存粮。[执事实景](screenshots/0.4.1/envoy.png) · [右键打开领地档案](screenshots/0.4.1/audience.png)
+
 在 JDK 25 下运行 `mvn clean verify`，25 项测试通过。资源包回归测试核对 SHA-1、四张源图、经典人形 UV 尺寸以及 ZIP 内的实际纹理路径。税仓改建、材料消耗和土地管理操作见[试玩说明](../examples/imperial-atlas/试玩说明.md)。
