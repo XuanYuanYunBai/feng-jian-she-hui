@@ -18,6 +18,12 @@ final class CharterOffice {
     void execute(CommandSender s,String[] a)throws SQLException{
         var p=player(s);realm.inWorld(p);String actor=p.getUniqueId().toString();
         switch(a[0]){
+            case "patent" -> {
+                usage(a.length>=11,"patent 帝国ID 伯爵|城市|修院 新ID 名称 人名 西 北 东 南 特许条件");
+                law.patent(actor,a[1],a[2],a[3],a[4],grantee(a[5]),bounds(a,6),
+                        String.join(" ",java.util.Arrays.copyOfRange(a,10,a.length)));
+                s.sendMessage("帝国直属特许已签发 · "+a[4]);
+            }
             case "register" -> {
                 usage(a.length==6,"register 君主头衔 西 北 东 南");var b=bounds(a,2);
                 law.register(actor,a[1],b);s.sendMessage("已登记 "+b.area()+" 区块直辖地");

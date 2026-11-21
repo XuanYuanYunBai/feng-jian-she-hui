@@ -36,4 +36,17 @@ class ChartersTest {
         assertEquals("crown",s.owner(9,1));assertEquals(256,c.areaHeld("g"));
     }
  }
+ @Test void imperialPatentCreatesAnImmediateCountyWithoutOpeningAnExtraRank()throws Exception{
+    try(var s=new RealmStore(temp.resolve("patent"))){
+        s.initialize("world",0,0,"rex");var f=new FiscalLedger(s);var c=new Charters(s);new Succession(s,c,f);
+        var b=new Bounds(5,0,6,0);
+        assertThrows(IllegalArgumentException.class,()->c.grant("rex","crown","伯爵","newcount","郡","a",b,false));
+        c.patent("rex","crown","伯爵","newcount","郡","a",b,"守渡特许");
+        assertEquals("直属特许",s.title("newcount").charter());
+        assertEquals("crown",s.title("newcount").parent());
+        assertThrows(IllegalArgumentException.class,()->c.patent("rex","crown","国王","bad","郡","a",b,"上封"));
+        assertEquals(1,s.number("SELECT count(*) FROM instrument WHERE title='newcount'"));
+    }
+ }
+
 }

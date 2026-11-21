@@ -86,7 +86,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
-                case "register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
+                case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "visit","ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> {
                     if(s instanceof Player p)books.directory(p);

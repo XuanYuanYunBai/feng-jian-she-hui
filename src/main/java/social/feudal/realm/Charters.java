@@ -94,6 +94,19 @@ final class Charters {
             return result;
         });
     }
+    void patent(String actor,String empire,String rank,String id,String name,String grantee,Bounds b,String terms)throws SQLException{
+        s.atomic(()->{
+            var ruler=acts(empire,actor);require(ruler.rank().equals("皇帝"),"帝国直属特许须由皇帝签发");
+            require(Set.of("伯爵","城市","修院").contains(rank),"直属特许可授伯爵、城市或修院");
+            require(!terms.isBlank() && terms.length()<=120,"请写明特许缘由与条件（1–120字）");
+            newId(id);available(ruler,b);
+            s.titleRow(id,name,rank,empire,"直属特许",grantee,b.west(),b.north());
+            transfer(id,b);
+            s.update("INSERT INTO instrument(title,period,event) VALUES(?,COALESCE((SELECT v FROM setting WHERE k='period'),1),?)",
+                    id,"帝国直属特许 · "+terms);
+            return null;
+        });
+    }
     String add(String actor,String id,Bounds b,boolean preview)throws SQLException{
         return s.atomic(()->{
             var governor=s.title(id);require(governor.charter().equals("流官"),"仅可追加流官辖地");
