@@ -12,7 +12,7 @@ import org.bukkit.entity.Player;
 final class RealmBooks {
     private final RealmService realm;
     RealmBooks(RealmService realm){this.realm=realm;}
-    private static Component heading(String s){return Component.text(s+"\n",NamedTextColor.DARK_RED,TextDecoration.BOLD);}
+    private static Component heading(String s){return Component.empty().append(Component.text(s+"\n",NamedTextColor.DARK_RED,TextDecoration.BOLD));}
     private static Component link(String text,String cmd){
         return Component.text(text,NamedTextColor.DARK_GREEN,TextDecoration.UNDERLINED).clickEvent(ClickEvent.runCommand(cmd));
     }

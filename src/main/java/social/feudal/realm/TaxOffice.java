@@ -6,6 +6,8 @@ import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import org.bukkit.*;
 import org.bukkit.command.CommandSender;
+import org.bukkit.block.Barrel;
+import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
@@ -63,7 +65,10 @@ final class TaxOffice {
                 require(p.getInventory().firstEmpty()>=0,"请腾出一个物品栏槽位");
                 int period=a.length==3?Integer.parseInt(a[2]):ledger.period();String actor=p.getUniqueId().toString();
                 var c=a[0].equals("collect")?ledger.collect(d.id(),period,actor):ledger.outstanding(d.id(),period,actor);
-                var box=new ItemStack(Material.BARREL);var meta=box.getItemMeta();
+                var box=new ItemStack(Material.BARREL);var meta=(BlockStateMeta)box.getItemMeta();
+                Barrel contents=(Barrel)meta.getBlockState();
+                contents.getSnapshotInventory().setItem(0,new ItemStack(Material.WHEAT,c.amount()));
+                meta.setBlockState(contents);
                 meta.displayName(Component.text("封缄税箱 · "+c.amount()+" 份小麦"));
                 meta.lore(List.of(Component.text("来源 "+d.name()+" / 第 "+period+" 税期"),Component.text("在所属公库手持并执行 /realm deposit")));
                 meta.getPersistentDataContainer().set(tag,PersistentDataType.STRING,c.id());box.setItemMeta(meta);
@@ -74,6 +79,11 @@ final class TaxOffice {
                 require(item.hasItemMeta(),"请主手持封缄税箱");
                 var id=item.getItemMeta().getPersistentDataContainer().get(tag,PersistentDataType.STRING);
                 require(id!=null,"请主手持封缄税箱");var c=ledger.crate(id);var t=realm.store.title(c.title());nearby(p,t.x(),t.z());
+                if(item.getItemMeta() instanceof BlockStateMeta meta && meta.hasBlockState()){
+                    var barrel=(Barrel)meta.getBlockState();
+                    var grain=barrel.getSnapshotInventory().getItem(0);
+                    require(grain!=null && grain.getType()==Material.WHEAT && grain.getAmount()==c.amount(),"税箱实物与账本不符");
+                }
                 int n=ledger.receive(id);item.subtract();s.sendMessage(t.name()+"公库已实收 "+n+" 份小麦");
             }
             case "visit" -> {
