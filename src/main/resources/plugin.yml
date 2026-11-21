@@ -1,6 +1,6 @@
 name: FeudalSurvey
 main: social.feudal.survey.SurveyPlugin
-version: '0.1.0'
+version: '0.1.1'
 api-version: '26.3'
 description: 封建社会 · 主世界资源勘测
 commands:

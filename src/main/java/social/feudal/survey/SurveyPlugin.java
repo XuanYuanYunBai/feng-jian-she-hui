@@ -21,6 +21,10 @@ public final class SurveyPlugin extends JavaPlugin {
     private MapIdentity map;
     private Rules rules;
     private int limit;
+    // Accessed on the server thread. Only count coordinates in a flushed batch.
+    private Ring savedRing;
+    private long savedFrom;
+    private long savedUntil;
 
     @Override public void onEnable() {
         try {
@@ -41,7 +45,9 @@ public final class SurveyPlugin extends JavaPlugin {
             Files.createDirectories(getDataFolder().toPath());
             Class.forName("org.sqlite.JDBC");
             store = new SurveyStore(getDataFolder().toPath().resolve("survey.sqlite"), rules);
+            boolean legacy = store.schemaVersion() == 0;
             progress = store.load(map);
+            if (legacy) getLogger().info("0.1.0 勘测记录已归档，按原中心复核。暂停状态请使用 /survey resume");
             if (progress != null && progress.ring().outer() > limit)
                 throw new IllegalArgumentException("预算低于已登记半径，请恢复 max-radius");
             getServer().getScheduler().runTaskTimer(this, this::tick, 1L, ticks);
@@ -93,18 +99,15 @@ public final class SurveyPlugin extends JavaPlugin {
         try {
             World world = getServer().getWorld(job.map().id());
             if (world == null) throw new IllegalStateException("已登记的主世界未加载");
+            if (!job.ring().equals(savedRing) || job.cursor() < savedFrom || job.cursor() >= savedUntil) {
+                prepare(world, job);
+                return;
+            }
             Point p = job.next();
-            long x = 16L * p.x(), z = 16L * p.z();
-            if (x < -29_999_984 || z < -29_999_984 || x + 15 >= 29_999_984 || z + 15 >= 29_999_984)
-                throw new IllegalStateException("已到达世界硬边界 " + p);
-            var border = world.getWorldBorder();
-            if (!border.isInside(new Location(world, x + 0.5, 0, z + 0.5))
-                    || !border.isInside(new Location(world, x + 15.5, 0, z + 15.5)))
-                throw new IllegalStateException("勘测区块触及现有世界边界 " + p);
-            world.getChunkAtAsync(p.x(), p.z(), true).whenComplete((chunk, error) -> {
+            getChunk(world, p, false).whenComplete((chunk, error) -> {
                 if (closing) return;
-                // A future may complete before registration. Always capture the snapshot on the server thread.
                 if (error != null) { stop(job, error); return; }
+                if (chunk == null) { stop(job, new IllegalStateException("已存盘的区块缺失 " + p)); return; }
                 Runnable capture = () -> capture(job, world, chunk);
                 if (Bukkit.isPrimaryThread()) capture.run();
                 else getServer().getScheduler().runTask(this, capture);
@@ -112,6 +115,44 @@ public final class SurveyPlugin extends JavaPlugin {
         } catch (Exception e) {
             stop(job, e);
         }
+    }
+
+    private CompletableFuture<Chunk> getChunk(World world, Point p, boolean generate) {
+        long x = 16L * p.x(), z = 16L * p.z();
+        if (x < -29_999_984 || z < -29_999_984 || x + 15 >= 29_999_984 || z + 15 >= 29_999_984)
+            throw new IllegalStateException("已到达世界硬边界 " + p);
+        var border = world.getWorldBorder();
+        if (!border.isInside(new Location(world, x + 0.5, 0, z + 0.5))
+                || !border.isInside(new Location(world, x + 15.5, 0, z + 15.5)))
+            throw new IllegalStateException("勘测区块触及现有世界边界 " + p);
+        return world.getChunkAtAsync(p.x(), p.z(), generate);
+    }
+
+    private void prepare(World world, Progress job) {
+        long end = Math.min(job.cursor() + 32, job.ring().size());
+        var mainThread = getServer().getScheduler().getMainThreadExecutor(this);
+        var chain = CompletableFuture.<Void>completedFuture(null);
+        int cx = Math.floorDiv(job.map().spawnX(), 16), cz = Math.floorDiv(job.map().spawnZ(), 16);
+        for (long i = job.cursor(); i < end; i++) {
+            Point pos = job.ring().at(cx, cz, i);
+            chain = chain.thenComposeAsync(ignored -> {
+                if (closing || progress != job) throw new CancellationException();
+                return getChunk(world, pos, true).thenAccept(chunk -> {
+                    if (chunk == null) throw new IllegalStateException("区块生成失败 " + pos);
+                });
+            }, mainThread);
+        }
+        // Paper can complete generation before region-file I/O. Flush outside the load callback.
+        chain.thenRunAsync(() -> {
+            if (closing || progress != job) return;
+            world.save(true);
+            savedRing = job.ring();
+            savedFrom = job.cursor();
+            savedUntil = end;
+        }, mainThread).whenComplete((ignored, error) -> {
+            if (error != null) stop(job, error);
+            else fetching.set(false);
+        });
     }
 
     private void capture(Progress job, World world, Chunk chunk) {

@@ -106,6 +106,41 @@ class SurveyTest {
         }
     }
 
+    @Test void legacySamplesAreArchivedOnceBeforeRecheckingTheOriginalWorld() throws Exception {
+        try (var store = new SurveyStore(file(), rules)) {
+            var first = store.record(store.start(map), rules.minimum(), 2);
+            store.change(first, first.phase(Phase.PAUSED));
+        }
+        try (var db = DriverManager.getConnection("jdbc:sqlite:" + file()); var st = db.createStatement()) {
+            st.execute("PRAGMA user_version=0");
+        }
+        try (var store = new SurveyStore(file(), rules)) {
+            assertThrows(IllegalStateException.class, () -> store.load(
+                    new MapIdentity(UUID.randomUUID(), map.seed(), map.generator(), 0, 80, 0)));
+            assertEquals(0, store.schemaVersion());
+            var p = store.load(map);
+            assertEquals(Phase.PAUSED, p.phase());
+            assertEquals(map, p.map());
+            assertEquals(Ores.ZERO, p.total());
+            assertEquals(0, p.cursor());
+            assertEquals(1, store.schemaVersion());
+            var run = p.phase(Phase.RUNNING);
+            store.change(p, run);
+            store.record(run, new Ores(1, 1, 1), 2);
+        }
+        try (var store = new SurveyStore(file(), rules)) {
+            assertEquals(1, store.load(map).cursor());
+            assertEquals(new Ores(1, 1, 1), store.load(map).total());
+        }
+        try (var db = DriverManager.getConnection("jdbc:sqlite:" + file()); var st = db.createStatement();
+             var r = st.executeQuery("SELECT gold, (SELECT phase FROM survey_v010) FROM chunks_v010")) {
+            assertTrue(r.next());
+            assertEquals(rules.minimum().gold(), r.getLong(1));
+            assertEquals("PAUSED", r.getString(2));
+            assertFalse(r.next());
+        }
+    }
+
     @Test void rejectsDifferentWorldOrRules() throws Exception {
         try (var store = new SurveyStore(file(), rules)) {
             store.start(map);

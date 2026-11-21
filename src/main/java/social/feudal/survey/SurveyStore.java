@@ -6,6 +6,10 @@ import java.util.UUID;
 import static social.feudal.survey.Survey.*;
 
 final class SurveyStore implements AutoCloseable {
+    private static final String CHUNKS_SCHEMA = """
+            CREATE TABLE IF NOT EXISTS chunks (
+              x INTEGER, z INTEGER, iron INTEGER, copper INTEGER, gold INTEGER, PRIMARY KEY(x,z))
+            """;
     private final Connection db;
     private final Rules rules;
 
@@ -13,6 +17,7 @@ final class SurveyStore implements AutoCloseable {
         this.rules = rules;
         db = DriverManager.getConnection("jdbc:sqlite:" + file.toAbsolutePath());
         try (var statement = db.createStatement()) {
+            if (schemaVersion() > 1) throw new SQLException("勘测数据库版本高于插件版本");
             statement.execute("PRAGMA journal_mode=WAL");
             statement.execute("PRAGMA synchronous=FULL");
             statement.execute("""
@@ -21,25 +26,57 @@ final class SurveyStore implements AutoCloseable {
                       spawn_x INTEGER, spawn_y INTEGER, spawn_z INTEGER, rules TEXT,
                       inner_radius INTEGER, radius INTEGER, cursor INTEGER, iron INTEGER, copper INTEGER, gold INTEGER, phase TEXT)
                     """);
-            statement.execute("""
-                    CREATE TABLE IF NOT EXISTS chunks (
-                      x INTEGER, z INTEGER, iron INTEGER, copper INTEGER, gold INTEGER, PRIMARY KEY(x,z))
-                    """);
+            statement.execute(CHUNKS_SCHEMA);
+            boolean empty;
+            try (var r = statement.executeQuery("SELECT NOT EXISTS(SELECT 1 FROM survey)")) {
+                empty = r.next() && r.getBoolean(1);
+            }
+            if (empty && schemaVersion() == 0) statement.execute("PRAGMA user_version=1");
         } catch (SQLException e) {
             db.close();
             throw e;
         }
     }
 
+    int schemaVersion() throws SQLException {
+        try (var st = db.createStatement(); var r = st.executeQuery("PRAGMA user_version")) {
+            if (!r.next()) throw new SQLException("无法读取勘测数据库版本");
+            return r.getInt(1);
+        }
+    }
+
     Progress load(MapIdentity current) throws SQLException {
+        Progress savedProgress;
         try (var st = db.createStatement(); var r = st.executeQuery("SELECT * FROM survey WHERE id=1")) {
             if (!r.next()) return null;
             var saved = new MapIdentity(UUID.fromString(r.getString("world")), r.getLong("seed"), r.getString("generator"),
                     r.getInt("spawn_x"), r.getInt("spawn_y"), r.getInt("spawn_z"));
             if (!saved.matches(current)) throw new IllegalStateException("世界、种子或生成器版本与勘测记录不符");
             if (!rules.key().equals(r.getString("rules"))) throw new IllegalStateException("勘测规则与存档不符，请恢复原配置");
-            return new Progress(saved, new Ring(r.getInt("inner_radius"), r.getInt("radius")), r.getLong("cursor"),
+            savedProgress = new Progress(saved, new Ring(r.getInt("inner_radius"), r.getInt("radius")), r.getLong("cursor"),
                     new Ores(r.getLong("iron"), r.getLong("copper"), r.getLong("gold")), Phase.valueOf(r.getString("phase")));
+        }
+        return schemaVersion() == 0 ? archiveUnflushedSurvey(savedProgress) : savedProgress;
+    }
+
+    // Version 0 has no boundary that proves both region data and its measurements reached disk.
+    private Progress archiveUnflushedSurvey(Progress old) throws SQLException {
+        Phase phase = old.phase() == Phase.RUNNING ? Phase.RUNNING : Phase.PAUSED;
+        Progress recheck = new Progress(old.map(), new Ring(0, rules.initial()), 0, Ores.ZERO, phase);
+        db.setAutoCommit(false);
+        try (var st = db.createStatement()) {
+            st.execute("CREATE TABLE survey_v010 AS SELECT * FROM survey");
+            st.execute("ALTER TABLE chunks RENAME TO chunks_v010");
+            st.execute(CHUNKS_SCHEMA);
+            change(old, recheck);
+            st.execute("PRAGMA user_version=1");
+            db.commit();
+            return recheck;
+        } catch (SQLException | RuntimeException e) {
+            db.rollback();
+            throw e;
+        } finally {
+            db.setAutoCommit(true);
         }
     }
 
