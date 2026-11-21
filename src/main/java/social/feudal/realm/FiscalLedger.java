@@ -69,11 +69,12 @@ final class FiscalLedger {
     Crate collect(String depot,int period,String actor)throws SQLException{
         return s.atomic(()->{
             var a=account(depot,period);
-            require(s.title(a.title()).seal().equals(actor),"当地持印人掌握该税权");
+            String recipient=right(depot(depot));
+            require(s.title(recipient).seal().equals(actor),"当地持印人掌握该税权");
             require(a.remaining()>0,"本期税款已结清");
             String id=UUID.randomUUID().toString();
             s.update("INSERT INTO crate(id,depot,period,title,amount,carrier) VALUES(?,?,?,?,?,?)",
-                    id,depot,period,a.title(),a.remaining(),actor);
+                    id,depot,period,recipient,a.remaining(),actor);
             s.update("UPDATE assessment SET packed=packed+? WHERE depot=? AND period=?",a.remaining(),depot,period);
             return crate(id);
         });

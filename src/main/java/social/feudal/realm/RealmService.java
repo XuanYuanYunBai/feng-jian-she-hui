@@ -19,6 +19,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final JavaPlugin plugin;
     final World world;
     final RealmStore store;
+    final CharterOffice charters;
     final TaxOffice taxes;
     private MapView view;
     private PoliticalMap renderer;
@@ -26,6 +27,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     public RealmService(JavaPlugin plugin,World world,Path path) throws SQLException {
         this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
+        charters=new CharterOffice(this);
         taxes=new TaxOffice(this);
         if(store.ready()) restoreMap();
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
@@ -62,6 +64,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             if(action.equals("help")){
                 s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
+                s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
                 s.sendMessage("管理员 /realm init 在线君主名  以主世界出生区块建立帝国");
                 return true;
             }
@@ -74,6 +77,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> atlas(s);
                 case "map" -> {
@@ -120,7 +124,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         s.sendMessage("国家 "+store.polity(t.id())+"  |  "+t.rank()+" · "+t.charter());
         s.sendMessage("直接上级 "+(t.parent()==null?"最高席位":store.title(t.parent()).name())+"  |  代号 "+t.id());
         s.sendMessage("法定任命 "+display(t.lawful())+"  |  实际持印 "+display(t.seal()));
-        s.sendMessage("税权 "+t.name()+"公库");
+        String beneficiary=store.value("SELECT tax_right.title FROM tax_right JOIN depot ON depot.id=tax_right.depot WHERE depot.x=? AND depot.z=?",x,z);
+        s.sendMessage("税权 "+(beneficiary==null?t.name():store.title(beneficiary).name())+"公库");
     }
     @Override public void close()throws SQLException{
         if(view!=null && renderer!=null)view.removeRenderer(renderer);
