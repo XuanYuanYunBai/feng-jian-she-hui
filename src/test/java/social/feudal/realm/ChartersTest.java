@@ -28,12 +28,12 @@ class ChartersTest {
         assertThrows(IllegalArgumentException.class,()->c.add("g","gov",new Bounds(0,1,7,1),false));
         assertThrows(IllegalArgumentException.class,()->c.grant("g","gov","伯爵","no","no","c",new Bounds(1,-6,2,-4),false));
         c.grant("rex","crown","流官","other","北区","g",new Bounds(-8,1,7,7),false);
-        s.update("INSERT INTO land VALUES(8,0,'crown')");
+        c.register("rex","crown",new Bounds(8,0,8,0));
+        c.register("rex","crown",new Bounds(8,1,9,1));
         c.add("rex","gov",new Bounds(1,0,8,0),false);c.add("rex","other",new Bounds(-8,0,-1,0),false);
         assertEquals(256,c.areaHeld("g"));
-        s.update("INSERT INTO land VALUES(9,0,'crown')");
-        assertThrows(IllegalArgumentException.class,()->c.add("rex","gov",new Bounds(9,0,9,0),false));
-        assertEquals("crown",s.owner(9,0));assertEquals(256,c.areaHeld("g"));
+        assertThrows(IllegalArgumentException.class,()->c.add("rex","gov",new Bounds(9,1,9,1),false));
+        assertEquals("crown",s.owner(9,1));assertEquals(256,c.areaHeld("g"));
     }
  }
 }

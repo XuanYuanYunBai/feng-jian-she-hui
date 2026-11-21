@@ -30,4 +30,25 @@ class FiscalTest {
         assertEquals(11,f.balance("march"));f.begin(2);assertEquals(16,f.account("ford",2).remaining());
     }
  }
+ @Test void newDepotStartsNextPeriodAndStepChangePreservesClosedAccounts()throws Exception{
+    try(var s=new RealmStore(temp.resolve("depot"))){
+        s.initialize("world",0,0,"king");var f=new FiscalLedger(s);f.begin(1);
+        s.foundDepot("king","south","南仓",0,6);
+        assertThrows(IllegalArgumentException.class,()->s.foundDepot("king","other","另一仓",0,6));
+        assertThrows(IllegalArgumentException.class,()->s.foundDepot("king","eastgate","东仓",64,1));
+        var wider=new FiscalLedger(s,2);wider.begin(1);
+        assertThrows(IllegalArgumentException.class,()->wider.account("south",1));
+        assertEquals(0,wider.account("ford",1).automatic());wider.begin(2);
+        assertEquals(16,wider.account("south",2).automatic());assertEquals(12,wider.account("ford",2).automatic());
+    }
+ }
+ @Test void aVisitRequiresConsentAndCannotEmptyOrDoubleChargeTheLocalTreasury()throws Exception{
+    try(var s=new RealmStore(temp.resolve("visit"))){
+        s.initialize("world",0,0,"king");var f=new FiscalLedger(s);f.begin(1);
+        assertEquals(4,f.visit("march","king",0));assertEquals(12,f.balance("march"));
+        assertThrows(IllegalArgumentException.class,()->f.visit("march","king",0));
+        assertEquals(0,f.visit("abbey","king",5));assertEquals(16,f.balance("abbey"));
+    }
+ }
+
 }

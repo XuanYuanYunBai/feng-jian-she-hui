@@ -57,10 +57,18 @@ final class Succession {
     }
     void confirm(String id,String actor)throws SQLException{
         s.atomic(()->{
-            superior(id,actor);
+            var t=superior(id,actor);
             require(s.number("SELECT petition FROM office WHERE id=?",id)==1,"尚无请袭文书");
             s.update("UPDATE office SET hereditary=1,petition=0 WHERE id=?",id);
+            if(t.lawful().equals(VACANT))install(id,t.seal());
             record(id,"君主确认家族世袭权");return null;
+        });
+    }
+    void relinquish(String id,String actor)throws SQLException{
+        s.atomic(()->{
+            law.acts(id,actor);
+            require(s.update("UPDATE office SET hereditary=0,petition=0 WHERE id=? AND hereditary=1",id)==1,"该官职没有已确认的世袭权");
+            record(id,"持印家族交回世袭权，恢复逐任任命");return null;
         });
     }
     private void capacity(RealmStore.Title t,String who)throws SQLException{

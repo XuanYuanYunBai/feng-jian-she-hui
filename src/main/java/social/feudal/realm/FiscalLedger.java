@@ -10,7 +10,11 @@ final class FiscalLedger {
     }
     record Crate(String id,String depot,String title,int amount,String carrier,boolean received){}
     private final RealmStore s;
-    FiscalLedger(RealmStore store)throws SQLException{
+    private final int chunksPerStep;
+    FiscalLedger(RealmStore store)throws SQLException{this(store,1);}
+    FiscalLedger(RealmStore store,int chunksPerStep)throws SQLException{
+        require(chunksPerStep>=1 && chunksPerStep<=64,"税距步长须为 1–64 区块");
+        this.chunksPerStep=chunksPerStep;
         s=store;
         s.update("""
             CREATE TABLE IF NOT EXISTS assessment(depot TEXT REFERENCES depot(id),period INTEGER,title TEXT REFERENCES title(id),
@@ -23,6 +27,7 @@ final class FiscalLedger {
             CREATE TABLE IF NOT EXISTS crate(id TEXT PRIMARY KEY,depot TEXT NOT NULL,period INTEGER NOT NULL,
             title TEXT NOT NULL REFERENCES title(id),amount INTEGER NOT NULL CHECK(amount>0),carrier TEXT NOT NULL,
             received INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(depot,period) REFERENCES assessment(depot,period))""");
+        s.update("CREATE TABLE IF NOT EXISTS visit(title TEXT REFERENCES title(id),period INTEGER,grain INTEGER NOT NULL,PRIMARY KEY(title,period))");
         s.update("CREATE TABLE IF NOT EXISTS tax_right(depot TEXT PRIMARY KEY REFERENCES depot(id),title TEXT REFERENCES title(id))");
     }
     static int rate(int steps){return Math.max(0,100-25*Math.max(0,Math.min(steps,7)-3));}
@@ -34,13 +39,15 @@ final class FiscalLedger {
     void begin(int period)throws SQLException{
         s.atomic(()->{
             require(period==period() || period==period()+1,"税期须连续");
+            if(period>period())s.update("INSERT OR REPLACE INTO setting VALUES('seconds',0)");
             for(var d:s.depots()){
+                if(s.number("SELECT v FROM setting WHERE k=?","first:"+d.id())>period)continue;
                 String title=right(d);
                 if(s.update("INSERT OR IGNORE INTO assessment(depot,period,title,due) VALUES(?,?,?,?)",
                         d.id(),period,title,d.yield())==0)continue;
                 var seat=s.title(title);
                 int steps=Math.abs(seat.x()-d.x())+Math.abs(seat.z()-d.z());
-                int amount=d.yield()*rate(steps)/100;
+                int amount=d.yield()*rate(Math.ceilDiv(steps,chunksPerStep))/100;
                 s.update("UPDATE assessment SET automatic=? WHERE depot=? AND period=?",amount,d.id(),period);
                 credit(title,amount);
             }
@@ -87,6 +94,23 @@ final class FiscalLedger {
         return s.atomic(()->{
             var c=crate(id);require(!c.received(),"此箱已入库");
             s.update("UPDATE crate SET received=1 WHERE id=?",id);credit(c.title(),c.amount());return c.amount();
+        });
+    }
+    int visit(String title,String actor,int localSupport)throws SQLException{
+        return s.atomic(()->{
+            var t=s.title(title);
+            require(t.parent()!=null && s.title(t.parent()).seal().equals(actor),"只有直属上级持印人能请求赠纳");
+            require(!Succession.isPlayer(t.seal()),"请由玩家持印人自行决定赠纳");
+            require(s.value("SELECT grain FROM visit WHERE title=? AND period=?",title,period())==null,"本期已经答复过请求");
+            int stock=balance(title);
+            int amount=Math.min(Math.max(0,stock-12),Math.max(0,4-localSupport));
+            if(!t.lawful().equals(t.seal()))amount=0;
+            s.update("INSERT INTO visit VALUES(?,?,?)",title,period(),amount);
+            if(amount>0){
+                s.update("UPDATE treasury SET grain=grain-? WHERE title=?",amount,title);
+                credit(t.parent(),amount);
+            }
+            return amount;
         });
     }
     void gift(String title,String actor,int amount)throws SQLException{

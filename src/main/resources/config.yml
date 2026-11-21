@@ -11,3 +11,7 @@ minimum-blocks:
 
 freight:
   pause-when-empty: true
+
+# 直辖税仓到本领驻地的曼哈顿区块距离，每步所含的区块数。改值从下一税期生效。
+realm:
+  chunks-per-tax-step: 1

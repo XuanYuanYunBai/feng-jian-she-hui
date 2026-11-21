@@ -30,6 +30,7 @@ final class Council {
             case "support" -> succession.sponsor(id,actor,p.getLocation().getBlockX()>>4,p.getLocation().getBlockZ()>>4);
             case "petition" -> succession.petition(id,actor);
             case "confirm" -> succession.confirm(id,actor);
+            case "relinquish" -> succession.relinquish(id,actor);
             case "vacate" -> succession.vacate(id,actor);
             case "yield","resist" -> succession.seal(id,actor,a[0].equals("yield"));
             case "offer" -> {

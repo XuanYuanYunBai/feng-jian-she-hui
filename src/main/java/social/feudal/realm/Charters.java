@@ -45,6 +45,27 @@ final class Charters {
     private void transfer(String title,Bounds b)throws SQLException{
         s.update("UPDATE land SET title=? WHERE x BETWEEN ? AND ? AND z BETWEEN ? AND ?",title,b.west(),b.east(),b.north(),b.south());
     }
+    void register(String actor,String title,Bounds b)throws SQLException{
+        s.atomic(()->{
+            var t=acts(title,actor);require(sovereign(t),"仅君主可将相邻未登记土地纳入直辖");
+            int area=b.area();require(area<=256,"单次登记最多 256 区块");
+            require(Math.abs((long)b.west())<1_875_000 && Math.abs((long)b.east())<1_875_000
+                    && Math.abs((long)b.north())<1_875_000 && Math.abs((long)b.south())<1_875_000,"已达世界边界");
+            require(s.number("SELECT count(*) FROM land WHERE x BETWEEN ? AND ? AND z BETWEEN ? AND ?",
+                    b.west(),b.east(),b.north(),b.south())==0,"选区内已有登记土地");
+            require(s.number("""
+                SELECT count(*) FROM land WHERE title=? AND ((x IN (?,?) AND z BETWEEN ? AND ?)
+                OR (z IN (?,?) AND x BETWEEN ? AND ?))""",title,b.west()-1,b.east()+1,b.north(),b.south(),
+                    b.north()-1,b.south()+1,b.west(),b.east())>0,"新增土地必须与本辖区共边");
+            try(var q=s.sql("INSERT INTO land VALUES(?,?,?)",0,0,title)){
+                for(int x=b.west();x<=b.east();x++)for(int z=b.north();z<=b.south();z++){
+                    q.setInt(1,x);q.setInt(2,z);q.addBatch();
+                }
+                q.executeBatch();
+            }
+            return null;
+        });
+    }
     private void newId(String id)throws SQLException{
         require(id.matches("[a-z][a-z0-9_-]{0,23}"),"代号须使用 1–24 位小写字母、数字、下划线或短横线");
         require(s.value("SELECT id FROM title WHERE id=?",id)==null,"头衔代号已存在");

@@ -117,9 +117,22 @@ public final class RealmStore implements AutoCloseable {
             while(r.next())rows.add(new Depot(r.getString(1),r.getString(2),r.getInt(3),r.getInt(4),r.getInt(5)));
         } return rows;
     }
+    void foundDepot(String actor,String id,String name,int x,int z)throws SQLException{
+        atomic(()->{
+            require(id.matches("[a-z][a-z0-9_-]{0,23}"),"无效税仓代号");
+            String owner=owner(x,z);require(owner!=null && title(owner).seal().equals(actor),"须由本区块持印人登记税仓");
+            require(value("SELECT id FROM depot WHERE id=? OR (x=? AND z=?)",id,x,z)==null,"代号或税仓区块已登记");
+            depotRow(id,name,x,z);
+            int first=Math.max(1,number("SELECT v FROM setting WHERE k='period'"))+1;
+            update("INSERT INTO setting VALUES(?,?)","first:"+id,first);return null;
+        });
+    }
     public String polity(String id) throws SQLException {
         Title t=title(id);
-        while(t.parent()!=null)t=title(t.parent());
+        while(t.parent()!=null){
+            if(t.rank().equals("国王"))return t.name()+"（"+title(t.parent()).name()+"内）";
+            t=title(t.parent());
+        }
         return t.name();
     }
     @Override public void close() throws SQLException { db.close(); }

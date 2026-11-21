@@ -18,7 +18,7 @@ final class TaxOffice {
     private final NamespacedKey tag;
     private int activeSeconds;
     TaxOffice(RealmService realm)throws SQLException{
-        this.realm=realm;ledger=new FiscalLedger(realm.store);tag=new NamespacedKey(realm.plugin,"tax_crate");
+        this.realm=realm;ledger=new FiscalLedger(realm.store,realm.plugin.getConfig().getInt("realm.chunks-per-tax-step",1));tag=new NamespacedKey(realm.plugin,"tax_crate");
         activeSeconds=realm.store.number("SELECT v FROM setting WHERE k='seconds'");
         if(realm.store.ready())ledger.begin(ledger.period());
         Bukkit.getScheduler().runTaskTimer(realm.plugin,this::tick,20,20);
@@ -50,8 +50,9 @@ final class TaxOffice {
                 usage(a.length<=2,"ledger [税期]");int period=a.length==2?Integer.parseInt(a[1]):ledger.period();
                 s.sendMessage("◆ 第 "+period+" 税期 · 税仓账簿   应收 / 自动 / 装箱 / 待征");
                 for(var d:realm.store.depots()){
+                    if(realm.store.value("SELECT title FROM assessment WHERE depot=? AND period=?",d.id(),period)==null)continue;
                     var row=ledger.account(d.id(),period);
-                    s.sendMessage(d.name()+" "+d.id()+"   "+row.due()+" / "+row.automatic()+" / "+row.packed()+" / "+row.remaining()+"  → "+realm.store.title(row.title()).name());
+                    s.sendMessage(d.name()+" "+d.id()+"   "+row.due()+" / "+row.automatic()+" / "+row.packed()+" / "+row.remaining()+"   期初 "+realm.store.title(row.title()).name());
                 }
             }
             case "treasury" -> {
@@ -74,6 +75,11 @@ final class TaxOffice {
                 var id=item.getItemMeta().getPersistentDataContainer().get(tag,PersistentDataType.STRING);
                 require(id!=null,"请主手持封缄税箱");var c=ledger.crate(id);var t=realm.store.title(c.title());nearby(p,t.x(),t.z());
                 int n=ledger.receive(id);item.subtract();s.sendMessage(t.name()+"公库已实收 "+n+" 份小麦");
+            }
+            case "visit" -> {
+                usage(a.length==2,"visit 直属领ID");var p=player(s);var t=realm.store.title(a[1]);nearby(p,t.x(),t.z());
+                int amount=ledger.visit(t.id(),p.getUniqueId().toString(),realm.council.succession.support(t.id()));
+                s.sendMessage(amount==0?"当地持印人谢绝赠纳":t.name()+"自愿赠粮 "+amount+" 份，双方公库已记账");
             }
             case "gift" -> {
                 usage(a.length==3,"gift 本领头衔ID 粮数");ledger.gift(a[1],player(s).getUniqueId().toString(),Integer.parseInt(a[2]));

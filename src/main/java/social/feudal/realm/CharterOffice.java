@@ -18,15 +18,23 @@ final class CharterOffice {
     void execute(CommandSender s,String[] a)throws SQLException{
         var p=player(s);realm.inWorld(p);String actor=p.getUniqueId().toString();
         switch(a[0]){
+            case "register" -> {
+                usage(a.length==6,"register 君主头衔 西 北 东 南");var b=bounds(a,2);
+                law.register(actor,a[1],b);s.sendMessage("已登记 "+b.area()+" 区块直辖地");
+            }
             case "preview","grant" -> {
                 usage(a.length==10,a[0]+" 上级 公爵|伯爵|流官 新ID 领名 人名 西 北 东 南");
                 boolean preview=a[0].equals("preview");
-                s.sendMessage((preview?"预览 · ":"授封完成 · ")+law.grant(actor,a[1],a[2],a[3],a[4],grantee(a[5]),bounds(a,6),preview));
+                var b=bounds(a,6);String person=grantee(a[5]);
+                s.sendMessage((preview?"预览 · ":"授封完成 · ")+law.grant(actor,a[1],a[2],a[3],a[4],person,b,preview));
+                if(preview)realm.preview(p,b,a[2].equals("流官")?"After "+(law.areaHeld(person)+b.area())+"/256":"Grant "+b.area());
             }
             case "extend","estimate" -> {
                 usage(a.length==6,a[0]+" 流官领ID 西 北 东 南");
                 boolean preview=a[0].equals("estimate");
-                s.sendMessage((preview?"预览 · ":"追加完成 · ")+law.add(actor,a[1],bounds(a,2),preview));
+                var b=bounds(a,2);
+                s.sendMessage((preview?"预览 · ":"追加完成 · ")+law.add(actor,a[1],b,preview));
+                if(preview)realm.preview(p,b,"After "+(law.areaHeld(realm.store.title(a[1]).seal())+b.area())+"/256");
             }
             case "estate" -> {
                 usage(a.length==7,"estate 上级 庄园|修院|磨坊|地租 新ID 名称 人名 税仓ID");
@@ -35,6 +43,8 @@ final class CharterOffice {
             }
             default -> throw new IllegalArgumentException("未知授封操作");
         }
-        realm.council.succession.sync();realm.changed();
+        if(!a[0].equals("preview") && !a[0].equals("estimate")){
+            realm.clearPreview(p);realm.council.succession.sync();realm.changed();
+        }
     }
 }

@@ -4,7 +4,6 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.logging.Level;
-import net.kyori.adventure.inventory.Book;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.*;
@@ -19,8 +18,10 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final JavaPlugin plugin;
     final World world;
     final RealmStore store;
+    final RealmBooks books;
     final Council council;
     final CharterOffice charters;
+    private final DepotMarkers markers;
     final TaxOffice taxes;
     private MapView view;
     private PoliticalMap renderer;
@@ -28,10 +29,12 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     public RealmService(JavaPlugin plugin,World world,Path path) throws SQLException {
         this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
+        books=new RealmBooks(this);
         charters=new CharterOffice(this);
         taxes=new TaxOffice(this);
         council=new Council(this);
         if(store.ready()) restoreMap();
+        markers=new DepotMarkers(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
     private void restoreMap() throws SQLException {
@@ -62,7 +65,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     void inWorld(Player p){RealmStore.require(p.getWorld().equals(world),"请前往登记的主世界");}
     @Override public boolean onCommand(CommandSender s,Command command,String label,String[] a){
         try {
-            String action=a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
+            String action=a.length==0 && s instanceof Player && store.ready()?"atlas":a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
+            if(a.length>0)a[0]=action;
             if(action.equals("help")){
                 s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
@@ -77,21 +81,28 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 usage(a.length==2,"init 在线君主名");
                 var l=world.getSpawnLocation();
                 store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,actor(a[1]));
-                council.succession.sync();taxes.ledger.begin(1);restoreMap();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
+                council.succession.sync();taxes.ledger.begin(1);restoreMap();markers.refresh();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
-                case "acts","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
-                case "preview","grant","extend","estimate","estate" -> charters.execute(s,a);
-                case "ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
-                case "atlas" -> atlas(s);
-                case "map" -> {
+                case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
+                case "register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
+                case "visit","ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
+                case "atlas" -> {
+                    if(s instanceof Player p)books.directory(p);
+                    else for(var t:store.titles())detail(s,t,t.x(),t.z());
+                }
+                case "brief" -> {usage(a.length==2,"brief 头衔ID");books.brief(player(s),store.title(a[1]));}
+                case "accounts" -> {
+                    usage(a.length<=3,"accounts [税仓ID] [税期]");
+                    if(a.length>=2)taxes.ledger.depot(a[1]);
+                    books.accounts(player(s),a.length==3?Integer.parseInt(a[2]):taxes.ledger.period(),a.length>=2?a[1]:"");
+                }
+                case "map","local" -> {
                     Player p=player(s);inWorld(p);
-                    var item=new ItemStack(Material.FILLED_MAP);
-                    var meta=(MapMeta)item.getItemMeta();meta.setMapView(view);
-                    meta.displayName(Component.text("帝国疆域图"));item.setItemMeta(meta);
-                    RealmStore.require(p.getInventory().firstEmpty()!=-1,"物品栏已满");
-                    p.getInventory().addItem(item);s.sendMessage("已领取疆域图，手持查看；/realm atlas 查阅图例");
+                    if(action.equals("local"))renderer.local(p.getUniqueId(),p.getLocation().getBlockX()>>4,p.getLocation().getBlockZ()>>4);
+                    else clearPreview(p);
+                    equipMap(p);s.sendMessage("已展开疆域图，右键查阅政治图册");
                 }
                 case "here" -> {
                     var p=player(s);inWorld(p);var l=p.getLocation();int x=l.getBlockX()>>4,z=l.getBlockZ()>>4;
@@ -100,30 +111,47 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                     else detail(s,store.title(owner),x,z);
                 }
                 case "title" -> {usage(a.length==2,"title 头衔ID");var t=store.title(a[1]);detail(s,t,t.x(),t.z());}
+                case "depot" -> {
+                    usage(a.length==3,"depot 税仓ID 仓名");var p=player(s);inWorld(p);
+                    var l=p.getLocation();store.foundDepot(p.getUniqueId().toString(),a[1],a[2],l.getBlockX()>>4,l.getBlockZ()>>4);
+                    markers.refresh();s.sendMessage("税仓已登记，下个税期开始入账");
+                }
                 case "depots" -> {
                     for(var d:store.depots())s.sendMessage(d.id()+" · "+d.name()+"  X "+(d.x()*16+8)+"  Z "+(d.z()*16+8));
                 }
                 default -> throw new IllegalArgumentException("未知操作，使用 /realm help");
             }
-        }catch(IllegalArgumentException ex){s.sendMessage(Component.text(ex.getMessage(),NamedTextColor.RED));}
+        }catch(NumberFormatException ex){s.sendMessage("区块坐标、税期与数量须为有效整数");}
+        catch(IllegalArgumentException ex){s.sendMessage(Component.text(ex.getMessage(),NamedTextColor.RED));}
         catch(SQLException ex){
             plugin.getLogger().log(Level.SEVERE,"政治账本操作失败",ex);
             s.sendMessage("账本读取或写入失败，请查看服务器日志");
         }
         return true;
     }
-    void changed(){if(renderer!=null)renderer.invalidate();}
-    private void atlas(CommandSender s)throws SQLException {
-        List<Component> pages=new ArrayList<>();
-        int i=0;
-        for(var t:store.titles()){
-            String text=(++i)+" · "+t.name()+"\n"+t.rank()+" / "+t.charter()+"\n\n驻地区块\n"+t.x()+", "+t.z()
-                    +"\n\n直接上级\n"+(t.parent()==null?"帝国最高席位":store.title(t.parent()).name())
-                    +"\n\n印主  "+display(t.seal())+"\n代号  "+t.id();
-            pages.add(Component.text(text));if(!(s instanceof Player))s.sendMessage(text.replace('\n',' '));
+    private void equipMap(Player p){
+        var inv=p.getInventory();
+        for(int slot=0;slot<36;slot++)if(isAtlas(inv.getItem(slot))){
+            if(slot<9)inv.setHeldItemSlot(slot);
+            else{
+                ItemStack old=inv.getItemInMainHand();inv.setItemInMainHand(inv.getItem(slot));inv.setItem(slot,old);
+            }
+            return;
         }
-        if(s instanceof Player p)p.openBook(Book.book(Component.text("帝国政治图册"),Component.text("纹章院"),pages));
+        int free=inv.firstEmpty();RealmStore.require(free>=0,"请腾出一个物品栏槽位");
+        var item=new ItemStack(Material.FILLED_MAP);var meta=(MapMeta)item.getItemMeta();
+        meta.setMapView(view);meta.displayName(Component.text("帝国疆域图"));item.setItemMeta(meta);
+        inv.setItem(free,inv.getItemInMainHand());inv.setItemInMainHand(item);
     }
+    void preview(Player p,Charters.Bounds b,String caption){
+        renderer.select(p.getUniqueId(),b,caption);
+        equipMap(p);p.sendMessage("疆域图已标出拟授选区与面积");
+    }
+    void clearPreview(Player p){if(renderer!=null)renderer.forget(p.getUniqueId());}
+    boolean isAtlas(ItemStack item){
+        return view!=null && item!=null && item.getItemMeta() instanceof MapMeta m && m.hasMapView() && m.getMapView()!=null && m.getMapView().getId()==view.getId();
+    }
+    void changed(){if(renderer!=null)renderer.invalidate();}
     private void detail(CommandSender s,RealmStore.Title t,int x,int z)throws SQLException {
         s.sendMessage(Component.text("◆ "+t.name()+"  ·  区块 "+x+", "+z,NamedTextColor.GOLD));
         s.sendMessage("国家 "+store.polity(t.id())+"  |  "+t.rank()+" · "+t.charter());
