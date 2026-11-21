@@ -23,6 +23,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final Contributions contributions;
     final ManorOffice manors;
     final MillOffice mills;
+    final CrossingOffice crossings;
+    final MarketOffice markets;
     final Council council;
     final CharterOffice charters;
     final DepotMarkers markers;
@@ -31,6 +33,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final social.feudal.transport.TransportCrew crews;
     private MapView view;
     private PoliticalMap renderer;
+    int mapRevision;
 
     public RealmService(JavaPlugin plugin,World world,Path path,social.feudal.transport.TransportCrew crews) throws SQLException {
         this.crews=crews;this.plugin=plugin;this.world=world;store=new RealmStore(path);
@@ -40,8 +43,10 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         charters=new CharterOffice(this);
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
-        council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);
+        council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
         if(store.ready()) restoreMap();
+        if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
+            Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);
         markers=new DepotMarkers(this);new SeatEnvoys(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
@@ -82,7 +87,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
                 s.sendMessage("/realm acts 查文书 · heir 提名 · vacate 交位 · appoint 任命 · yield 交印 · resist 抗命");
                 s.sendMessage("/realm support 联署 · petition 请袭 · confirm 准袭 · offer 拟约 · ratify 签署");
-                s.sendMessage("管理员 /realm init 在线君主名  以主世界出生区块建立帝国");
+                s.sendMessage("/realm estates 庄园公议 · diplomacy 外交院 · map country 国家图 · map empire 帝国图");
+                s.sendMessage("/realm watermill 庄园ID 磨坊ID · field 登记田地 · farmjob 派工 · bridge 登记桥亭");
+                s.sendMessage("管理员 /realm init [在线皇帝名]  设立初始成员，留空由皇廷署理");
                 return true;
             }
             if(action.equals("init")){
@@ -90,13 +97,15 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 usage(a.length<=2,"init [在线皇帝名]");
                 var l=world.getSpawnLocation();
                 store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,a.length==2?actor(a[1]):"npc-皇廷署理");
-                council.succession.sync();taxes.openPeriod(1);restoreMap();markers.refresh();s.sendMessage("河湾帝国及初始成员已登记。使用 /realm atlas");return true;
+                council.succession.sync();taxes.openPeriod(1);restoreMap();changed();markers.refresh();s.sendMessage("河湾帝国及初始成员已登记。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "stall","market","bidform","bid","sell" -> markets.run(player(s),a);
+                case "bridge","crossing","toll","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
-                case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer" -> manors.run(player(s),a);
-                case "diplomacy","org","document","debate","compose","agenda","treaty","sign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
+                case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
+                case "diplomacy","org","document","debate","compose","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "equip" -> {usage(a.length==3,"equip 税仓ID speed|pack|mule");taxes.couriers.equip(player(s),taxes.ledger.depot(a[1]),a[2]);}
@@ -187,7 +196,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     boolean isAtlas(ItemStack item){
         return view!=null && item!=null && item.getItemMeta() instanceof MapMeta m && m.hasMapView() && m.getMapView()!=null && m.getMapView().getId()==view.getId();
     }
-    void changed(){if(renderer!=null)renderer.invalidate();}
+    void changed(){mapRevision++;if(renderer!=null)renderer.invalidate();}
     private void detail(CommandSender s,RealmStore.Title t,int x,int z)throws SQLException {
         s.sendMessage(Component.text("◆ "+t.name()+"  ·  区块 "+x+", "+z,NamedTextColor.GOLD));
         s.sendMessage("国家 "+store.polity(t.id())+"  |  "+t.rank()+" · "+t.charter());

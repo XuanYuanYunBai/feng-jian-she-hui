@@ -81,4 +81,76 @@ class PoliticsTest {
             f.begin(1,java.util.Map.of("east",400));assertEquals(140,f.account("east",1).due());
         }
     }
+    @Test void obligationRequiresActualMatchingFreightAndCanBeCreditedOnce()throws Exception{
+        Path manifest=tmp.resolve("freight.sqlite");
+        try(var db=java.sql.DriverManager.getConnection("jdbc:sqlite:"+manifest);var q=db.createStatement()){
+            q.execute("CREATE TABLE routes(name TEXT,world TEXT,dx INTEGER,dz INTEGER)");
+            q.execute("INSERT INTO routes VALUES('wharf','world',1024,0)");
+            q.execute("CREATE TABLE trips(id TEXT,route TEXT,material TEXT,amount INTEGER,phase TEXT,sender TEXT,signer TEXT,delivered_at TEXT)");
+        }
+        try(var s=open("dues")){
+            country(s,"west",ALICE,true);var ledger=new Contributions(s,manifest);
+            int pledge=ledger.pledge("empire","west",ALICE,"wharf","WHEAT",16,2);
+            try(var db=java.sql.DriverManager.getConnection("jdbc:sqlite:"+manifest);var q=db.createStatement()){
+                q.execute("INSERT INTO trips VALUES('load','wharf','WHEAT',8,'TRAVEL','"+ALICE+"',null,null)");
+                assertThrows(IllegalArgumentException.class,()->ledger.credit(pledge,ALICE,"load"));
+                q.execute("UPDATE trips SET phase='DELIVERED',signer='buyer',delivered_at=datetime('now','+1 second')");
+            }
+            ledger.credit(pledge,ALICE,"load");
+            assertThrows(IllegalArgumentException.class,()->ledger.credit(pledge,ALICE,"load"));
+            assertEquals(8,s.number("SELECT received FROM contribution WHERE id=?",pledge));
+        }
+    }
+    @Test void onlyUncontestedConnectedFrontierCanPassAndCapitalsFollowTheirCountry()throws Exception{
+        try(var s=open("frontier")){
+            var reg=new SettlementRegister(s);
+            var bounds=new Charters.Bounds(72,0,73,0);
+            reg.estate("border","东岸边庄","东境伯家",1154,64,4,new Charters.Bounds(1152,0,1167,15));
+            assertThrows(IllegalArgumentException.class,()->reg.propose("东境伯家","border","march","开拓",bounds,0,1));
+            reg.permit("npc-皇廷署理","march",bounds);
+            int id=reg.propose("东境伯家","border","march","开拓",bounds,0,1);
+            reg.object(id,"other",73,0,"边界待议");
+            s.update("UPDATE manor SET service=1");s.update("INSERT INTO setting VALUES('season',1)");
+            reg.resolve(id,"东境伯家",2);assertEquals("march",s.owner(72,0));assertNull(s.owner(73,0));
+            reg.moveCapital("march","border","东境伯家");
+            assertEquals(72,s.title("march").x());assertEquals("东境伯家",reg.manor("border").owner());
+            assertTrue(s.politics.imperial("march"));assertFalse(s.politics.member("empire","crown"));
+        }
+    }
+    @Test void legacyWorldIsBackedUpBeforeAttributingPublicRights()throws Exception{
+        Path path=tmp.resolve("legacy.sqlite");
+        try(var db=java.sql.DriverManager.getConnection("jdbc:sqlite:"+path);var q=db.createStatement()){
+            q.execute("CREATE TABLE setting(k TEXT PRIMARY KEY,v TEXT NOT NULL)");
+            q.execute("INSERT INTO setting VALUES('world','old')");
+            q.execute("CREATE TABLE title(id TEXT PRIMARY KEY,name TEXT,rank TEXT,parent TEXT,charter TEXT,lawful TEXT,seal TEXT,x INTEGER,z INTEGER)");
+            q.execute("INSERT INTO title VALUES('crown','河湾帝国','皇帝',NULL,'皇室','npc-代理','npc-代理',0,0)");
+            q.execute("INSERT INTO title VALUES('march','东境伯领','伯爵','crown','直属特许','东境伯家','东境伯家',64,0)");
+            q.execute("CREATE TABLE treasury(title TEXT PRIMARY KEY,grain INTEGER)");
+            q.execute("INSERT INTO treasury VALUES('crown',18)");
+        }
+        try(var s=new RealmStore(path)){
+            assertEquals("皇室旧领（待清册）",s.title("crown").name());assertNull(s.politics.nation("crown"));
+            assertEquals("东境伯领",s.polity("march"));assertTrue(s.politics.member("empire","march"));
+            assertEquals(18,s.number("SELECT grain FROM treasury WHERE title='crown'"));
+        }
+        try(var copy=java.sql.DriverManager.getConnection("jdbc:sqlite:"+path+".pre-0.5.0");var q=copy.createStatement();
+            var row=q.executeQuery("SELECT name FROM title WHERE id='crown'")){
+            assertTrue(row.next());assertEquals("河湾帝国",row.getString(1));
+        }
+    }
+    @Test void anEmperorCanSignForTheEmpireOnlyWithATreatySpecificMandate()throws Exception{
+        try(var s=open("mandate")){
+            country(s,"duchy",ALICE,true);country(s,"abroad",BOB,false);
+            var law=s.politics;law.requestElection("duchy",ALICE);
+            law.draft("riverpact","跨境通航","条约","准许两岸粮船靠港",List.of("abroad","@empire"),"abroad",BOB);
+            assertThrows(IllegalArgumentException.class,()->law.signOrganisation("riverpact","empire",ALICE));
+            int n=law.propose("empire","march","东境伯家","外交授权","riverpact","duchy");
+            law.vote(n,"march","东境伯家",true);law.vote(n,"abbey","主教座堂",true);
+            assertThrows(IllegalArgumentException.class,()->law.signOrganisation("riverpact","empire",BOB));
+            law.signOrganisation("riverpact","empire",ALICE);
+            assertEquals("生效",s.value("SELECT state FROM treaty WHERE id='riverpact'"));
+            assertNull(s.value("SELECT nation FROM signatory WHERE treaty='riverpact' AND nation='duchy'"));
+            assertEquals(ALICE,s.value("SELECT signer FROM organisation_signature WHERE org='empire'"));
+        }
+    }
 }

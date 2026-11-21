@@ -103,6 +103,8 @@ final class RealmDialogs {
         body.add(text("第 " + period + " 税期　·　实物税"));
         if (realm.store.value("SELECT title FROM assessment WHERE depot=? AND period=?",id,period)==null) {
             body.add(text("本期尚无应收记录"));
+        } else if(!realm.taxes.canRead(p,f.account(id,period).title())){
+            body.add(text("实物税账向本期权利人开放"));
         } else {
             var a = f.account(id,period);
             int received=realm.store.number("SELECT sum(amount) FROM crate WHERE depot=? AND period=? AND received=1",id,period);

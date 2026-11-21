@@ -25,7 +25,7 @@ final class WarehouseFixtures {
         Block b=realm.world.getBlockAt(xyz[0],xyz[1],xyz[2]);
         return b.getState(false) instanceof TileState tile && (role+"/"+id).equals(tile.getPersistentDataContainer().get(tag,PersistentDataType.STRING))?b:null;
     }
-    private void bind(Block target,String role,String id){
+    void bind(Block target,String role,String id){
         var tile=(TileState)target.getState();
         String name=role+"/"+id;
         String other=tile.getPersistentDataContainer().get(tag,PersistentDataType.STRING);

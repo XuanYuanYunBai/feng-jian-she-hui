@@ -72,8 +72,8 @@ final class TaxCouriers implements Listener {
         for(int slot=0;slot<inv.getSize();slot++){
             var box=inv.getItem(slot);String id=office.id(box);if(id==null)continue;
             if(realm.store.number("SELECT count(*) FROM parcel JOIN crate USING(id) WHERE id=? AND depot=? AND automatic=1 AND received=0",id,d.id())==0)continue;
-            var t=realm.store.title(office.ledger.right(d));if(office.vault(t)==null)continue;
-            var c=office.ledger.crate(id);if(c.amount()+carried>team.capacity())continue;
+            var c=office.ledger.crate(id);var t=realm.store.title(c.title());if(office.vault(t)==null)continue;
+            if(c.amount()+carried>team.capacity())continue;
             int free=-1;
             for(int j=team.mule()==null?0:2;j<bags.getSize();j++)if(bags.getItem(j)==null){free=j;break;}
             if(free<0)break;

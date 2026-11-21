@@ -120,7 +120,9 @@ final class ManorOffice implements Listener {
         body.add(text("业主　"+realm.display(m.owner())+"　｜　在住 "+m.households()+" 户"));
         body.add(text("厅堂　"+m.x()+"，"+m.y()+"，"+m.z()+"　｜　完成赈济 "+m.service()+" 季"));
         body.add(text("讲台旁木桶每季供给每户一份面包，并留三份赈济。增设床位和供粮可接纳迁户。"));
-        if(s.value("SELECT nation FROM capital WHERE manor=?",id)!=null)body.add(text("首都　"+s.polity(id)));
+        String nation=s.value("SELECT nation FROM capital WHERE manor=?",id);
+        if(nation!=null)body.add(text("首都　"+s.title(nation).name()));
+        for(String mill:realm.diplomacy.column("SELECT id FROM mill WHERE manor=?",id))buttons.add(command("水磨 · "+mill,"realm mill "+mill));
         if(m.owner().equals(p.getUniqueId().toString()) && s.value("SELECT id FROM nation WHERE id=?",id)==null){
             buttons.add(command("申请建领","realm surveyclaim "+id));
         }
@@ -155,7 +157,7 @@ final class ManorOffice implements Listener {
                 usage(a.length==7,"settle 代号 名称 西 北 东 南（方块）");
                 var block=p.getTargetBlockExact(6);require(block!=null && block.getType()==Material.LECTERN,"请瞄准庄宅讲台");
                 var m=new SettlementRegister.Manor(a[1],a[2],actor,block.getX(),block.getY(),block.getZ(),bounds(a,3),3,0);
-                inspect(m);register.estate(m.id(),m.name(),actor,m.x(),m.y(),m.z(),m.estate());archive(p,m.id());
+                inspect(m);register.estate(m.id(),m.name(),actor,m.x(),m.y(),m.z(),m.estate());realm.changed();archive(p,m.id());
             }
             case "manor" -> {usage(a.length==2,"manor 庄园");archive(p,a[1]);}
             case "surveyclaim" -> {
@@ -168,7 +170,7 @@ final class ManorOffice implements Listener {
                 usage(a.length==7,a[0]+" 庄园 入帝|独立（开拓填头衔ID） 西 北 东 南");
                 var m=register.manor(a[1]);hall(p,m);inspect(m);boolean founding=a[0].equals("found");
                 int n=register.propose(actor,m.id(),founding?m.id():a[2],founding?a[2]:"开拓",bounds(a,3),System.currentTimeMillis()/1000,noticeSeconds);
-                p.sendMessage("边界公示 #"+n+" 已张贴");hearing(p,n);
+                realm.changed();p.sendMessage("边界公示 #"+n+" 已张贴");hearing(p,n);
             }
             case "hearing" -> {usage(a.length==2,"hearing 公示号");hearing(p,Integer.parseInt(a[1]));}
             case "object" -> {usage(a.length>=3,"object 公示号 理由");register.object(Integer.parseInt(a[1]),actor,l.getBlockX()>>4,l.getBlockZ()>>4,String.join(" ",Arrays.copyOfRange(a,2,a.length)));p.sendMessage("已记入本区块异议");}
@@ -181,6 +183,20 @@ final class ManorOffice implements Listener {
                 realm.council.succession.sync();realm.changed();hearing(p,c.id());
             }
             case "permit" -> {usage(a.length==6,"permit 受许头衔 西 北 东 南");register.permit(actor,a[1],bounds(a,2));p.sendMessage("边境开拓封契已签发");}
+            case "capital" -> {
+                usage(a.length==3,"capital 国家 新庄园");var m=register.manor(a[2]);hall(p,m);inspect(m);
+                var bin=realm.fixtures.bin(m.x()>>4,m.z()>>4,"vault",a[1]);
+                require(bin!=null,"请先瞄准新公库箱子，使用 /realm seatvault 国家 庄园");
+                register.moveCapital(a[1],a[2],actor);realm.changed();realm.dialogs.brief(p,s.title(a[1]));
+            }
+            case "seatvault" -> {
+                usage(a.length==3,"seatvault 国家 庄园");var m=register.manor(a[2]);hall(p,m);
+                s.politics.represents(a[1],actor);
+                require(m.owner().equals(actor) && a[1].equals(s.owner(m.x()>>4,m.z()>>4)),"须在本国直辖的自有庄园办理");
+                var b=p.getTargetBlockExact(6);require(b!=null && m.estate().contains(b.getX(),b.getZ()) && (b.getX()>>4)==(m.x()>>4) && (b.getZ()>>4)==(m.z()>>4),"请瞄准庄宅所在区块的库箱");
+                require(b.getType()==Material.BARREL || b.getType()==Material.CHEST,"公库使用桶或箱子");
+                realm.fixtures.bind(b,"vault",a[1]);p.sendMessage("已登记治所公库，粮食须实际搬运");
+            }
             case "peer" -> {
                 usage(a.length>=4,"peer 领邦 申请|批准|驳回 理由");register.peer(actor,a[1],a[2],String.join(" ",Arrays.copyOfRange(a,3,a.length)));
                 if(a[2].equals("申请") && s.title("crown").seal().equals("npc-皇廷署理"))

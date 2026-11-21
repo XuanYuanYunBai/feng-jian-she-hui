@@ -39,6 +39,11 @@ final class SettlementRegister {
             for(int cx=b.west()>>4;cx<=b.east()>>4;cx++)for(int cz=b.north()>>4;cz<=b.south()>>4;cz++){
                 String owner=s.owner(cx,cz);require(owner==null || s.title(owner).seal().equals(actor),"建庄涉及他领，请先取得土地");
             }
+            if(s.number("SELECT count(*) FROM manor WHERE owner=?",actor)>0){
+                String source=s.value("SELECT id FROM manor WHERE owner=? AND households>=4 ORDER BY households DESC,id LIMIT 1",actor);
+                require(source!=null,"另立庄园需要从已有庄园派出三户，原庄至少留一户");
+                s.update("UPDATE manor SET households=households-3 WHERE id=?",source);
+            }
             s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     id,name,actor,x,y,z,b.west(),b.north(),b.east(),b.south());return null;
         });
@@ -138,6 +143,19 @@ final class SettlementRegister {
         });
     }
     private static long key(int x,int z){return ((long)x<<32)|(z&0xffffffffL);}
+    void moveCapital(String nation,String manor,String actor)throws SQLException{
+        s.atomic(()->{
+            s.politics.represents(nation,actor);var m=manor(manor);
+            require(m.owner().equals(actor),"新治所须获庄园主同意");
+            int x=m.x()>>4,z=m.z()>>4;
+            require(nation.equals(s.owner(x,z)),"新首都须在本国直辖领");
+            require(!manor.equals(s.value("SELECT manor FROM capital WHERE nation=?",nation)),"已经是首都");
+            s.update("UPDATE title SET x=?,z=? WHERE id=?",x,z,nation);
+            s.update("INSERT OR REPLACE INTO capital VALUES(?,?)",nation,manor);
+            s.politics.log(null,nation,"迁都至 "+m.name()+"。历史税单沿用期初税距，旧仓货物待实运。");
+            return null;
+        });
+    }
     void peer(String actor,String country,String decision,String reason)throws SQLException{
         s.atomic(()->{
             require(s.politics.member(Politics.EMPIRE,country) && s.title(country).rank().equals("地主"),"仅帝国内无爵领邦可请爵");

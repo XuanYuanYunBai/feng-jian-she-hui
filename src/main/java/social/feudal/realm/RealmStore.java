@@ -1,6 +1,7 @@
 package social.feudal.realm;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.sql.*;
 import java.util.*;
 
@@ -28,6 +29,10 @@ public final class RealmStore implements AutoCloseable {
             update("""
                 CREATE TABLE IF NOT EXISTS depot(id TEXT PRIMARY KEY,name TEXT NOT NULL,x INTEGER NOT NULL,z INTEGER NOT NULL,
                 yield INTEGER NOT NULL CHECK(yield>0),FOREIGN KEY(x,z) REFERENCES land(x,z))""");
+            if(ready() && value("SELECT name FROM sqlite_master WHERE name='association'")==null){
+                Path backup=path.resolveSibling(path.getFileName()+".pre-0.5.0");
+                if(!Files.exists(backup))try(var statement=sql("VACUUM INTO ?",backup.toString())){statement.execute();}
+            }
             politics=new Politics(this);
         } catch (SQLException | RuntimeException ex) { db.close(); throw ex; }
     }
@@ -79,6 +84,11 @@ public final class RealmStore implements AutoCloseable {
                     q.setInt(1,t.x()+dx); q.setInt(2,t.z()+dz); q.setString(3,t.id()); q.addBatch();
                 }
                 q.executeBatch();
+            }
+            if(Succession.isPlayer(sovereign)){
+                titleRow("riverhome","河湾公国","公爵","crown","直属特许",sovereign,x-48,z);
+                for(int dx=-2;dx<2;dx++)for(int dz=-2;dz<2;dz++)
+                    update("INSERT INTO land VALUES(?,?,?)",x-48+dx,z+dz,"riverhome");
             }
             politics.bootstrap(false);
             depotRow("town","王城市集",x,z);

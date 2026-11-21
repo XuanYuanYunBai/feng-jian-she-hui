@@ -47,16 +47,21 @@ final class DiplomacyDesk {
         var names=new ArrayList<String>();
         for(String id:column("SELECT nation FROM member WHERE org=? ORDER BY nation",org)){
             var t=s.title(id);
-            String role=s.number("SELECT elector FROM member WHERE org=? AND nation=?",org,id)==1?" · 选侯":"";
+            String role=s.number("SELECT elector FROM member WHERE org=? AND nation=?",org,id)==1?" · 选侯":s.number("SELECT seat FROM member WHERE org=? AND nation=?",org,id)==1?" · 议席":" · 成员";
             names.add(t.name()+role);buttons.add(command(t.name(),"realm brief "+id));
         }
         body.add(text("成员 "+names.size()+" 国　｜　"+String.join("、",names)));
+        for(String doc:column("SELECT treaty FROM organisation_signature WHERE org=? AND signer IS NULL",org))
+            buttons.add(command("待授组织签字 · "+doc,"realm document "+doc));
         for(String id:column("SELECT id FROM motion WHERE org=? ORDER BY id DESC LIMIT 12",org))
             buttons.add(command("议案 "+id+" · "+s.value("SELECT kind || ' · ' || state FROM motion WHERE id=?",id),"realm debate "+id));
         for(String country:countries(p)){
             if(law.member(org,country)){
                 if(org.equals(Politics.EMPIRE) && !Succession.isPlayer(s.title("crown").lawful()))
                     buttons.add(command(s.title(country).name()+" · 参选帝位","realm stand "+country));
+                if(org.equals(Politics.EMPIRE) && s.number("SELECT seat FROM member WHERE org=? AND nation=?",org,country)==0)
+                    buttons.add(command(s.title(country).name()+" · 请授议席","realm propose empire "+country+" 授席 "+country+" 请求议会授予独立席位"));
+                if(org.equals(Politics.EMPIRE))buttons.add(command(s.title(country).name()+" · 议退帝国","realm propose empire "+country+" 退帝 "+country+" 依议会裁定解除成员资格"));
                 if(!org.equals(Politics.EMPIRE))buttons.add(command(s.title(country).name()+" · 退出","realm withdraw "+org+" "+country));
                 buttons.add(command(s.title(country).name()+" · 提案","realm agenda "+org+" "+country));
             }else buttons.add(command(s.title(country).name()+" · 申请加入","realm propose "+org+" "+country+" 接纳 "+country+" 申请依章加入"));
@@ -77,6 +82,17 @@ final class DiplomacyDesk {
             body.add(text(s.title(country).name()+"　"+(signer==null?"待批准":realm.display(signer)+" 已盖印")));
             if(signer==null && my.contains(country))buttons.add(command("代表"+s.title(country).name()+"签署","realm sign "+id+" "+country));
         }
+        for(String org:column("SELECT org FROM organisation_signature WHERE treaty=?",id)){
+            String sign=s.value("SELECT signer FROM organisation_signature WHERE treaty=? AND org=?",id,org);
+            String delegate=s.value("SELECT delegate FROM organisation_signature WHERE treaty=? AND org=?",id,org);
+            body.add(text(s.value("SELECT name FROM association WHERE id=?",org)+"　"+(sign!=null?realm.display(sign)+" 已代表组织签署":delegate==null?"尚待组织授权":"议会已授权")));
+            if(sign!=null)continue;
+            if(delegate==null){
+                for(String country:my)if(law.member(org,country))
+                    buttons.add(command(s.title(country).name()+" · 提请授权","realm propose "+org+" "+country+" 外交授权 "+id+" "+country));
+            }else if(org.equals(Politics.EMPIRE)?s.title("crown").seal().equals(p.getUniqueId().toString()):my.contains(delegate))
+                buttons.add(command("以组织名义签署","realm orgsign "+id+" "+org));
+        }
         buttons.add(command("外交院","realm diplomacy"));show(p,name,body,List.of(),buttons,2);
     }
     void debate(Player p,int id)throws SQLException{
@@ -92,6 +108,13 @@ final class DiplomacyDesk {
             }
         }
         buttons.add(command("返回组织档案","realm org "+org));show(p,"第 "+id+" 号议案",body,List.of(),buttons,2);
+    }
+    private void present(Player p,String id)throws SQLException{
+        if(law.unsigned(id)!=1)return;
+        for(var signer:column("SELECT signer FROM signatory WHERE treaty=? AND signer IS NOT NULL UNION SELECT signer FROM organisation_signature WHERE treaty=? AND signer IS NOT NULL",id,id)){
+            var other=Bukkit.getPlayer(UUID.fromString(signer));
+            require(other!=null && other.getWorld().equals(p.getWorld()) && other.getLocation().distanceSquared(p.getLocation())<=144,"最后签署时请各方签署人到十二格内交换正本");
+        }
     }
     record Field(String key,String label,String initial,int max){}
     static void form(Player p,String title,String hint,String prefix,List<Field> fields){
@@ -120,7 +143,7 @@ final class DiplomacyDesk {
             case "debate" -> {usage(a.length==2,"debate 议案");debate(p,Integer.parseInt(a[1]));}
             case "compose" -> {usage(a.length==2,"compose 本国");law.represents(a[1],actor);
                 form(p,"起草多边文书","本国先签，最后一国批准时创始签署人须在场。国家代号可在各领档案查询。",
-                        "realm treaty "+a[1],List.of(new Field("id","文书代号","",24),new Field("name","名称","",30),new Field("kind","条约、河运同盟或防御联盟","条约",8),new Field("members","各国代号（含本国）",a[1]+",",180),new Field("terms","条款","",200)));
+                        "realm treaty "+a[1],List.of(new Field("id","文书代号","",24),new Field("name","名称","",30),new Field("kind","条约、河运同盟或防御联盟","条约",8),new Field("members","缔约方（本国、他国或 @组织）",a[1]+",",180),new Field("terms","条款","",200)));
             }
             case "agenda" -> {usage(a.length==3,"agenda 组织 本国");law.represents(a[2],actor);
                 form(p,"提出议案","选帝填写候选国。议决或修章填写本国代号。成员按章投票。","realm propose "+a[1]+" "+a[2],
@@ -130,13 +153,9 @@ final class DiplomacyDesk {
                 law.draft(a[2],a[3],a[4],String.join(" ",Arrays.copyOfRange(a,6,a.length)),Arrays.asList(a[5].replace('，',',').split(",",-1)),a[1],actor);
                 document(p,a[2]);}
             case "sign" -> {usage(a.length==3,"sign 条约 本国");
-                if(s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer IS NULL",a[1])==1){
-                    for(var signer:column("SELECT signer FROM signatory WHERE treaty=? AND signer IS NOT NULL",a[1])){
-                        var other=Bukkit.getPlayer(UUID.fromString(signer));
-                        require(other!=null && other.getWorld().equals(p.getWorld()) && other.getLocation().distanceSquared(p.getLocation())<=144,"最后签署时请各国签署人到十二格内交换正本");
-                    }
-                }
+                present(p,a[1]);
                 law.sign(a[1],a[2],actor);document(p,a[1]);}
+            case "orgsign" -> {usage(a.length==3,"orgsign 条约 组织");present(p,a[1]);law.signOrganisation(a[1],a[2],actor);document(p,a[1]);}
             case "propose" -> {usage(a.length>=6,"propose 组织 本国 种类 所涉国家 条款");
                 debate(p,law.propose(a[1],a[2],actor,a[3],a[4],String.join(" ",Arrays.copyOfRange(a,5,a.length))));}
             case "vote" -> {usage(a.length==4 && Set.of("赞成","反对").contains(a[3]),"vote 议案 本国 赞成|反对");

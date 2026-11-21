@@ -78,8 +78,8 @@ final class PoliticalMap extends MapRenderer {
                 for(int x=x0;x<=x1;x++){c.setPixelColor(x,y0,INK);c.setPixelColor(x,y1,INK);}
                 for(int y=y0;y<=y1;y++){c.setPixelColor(x0,y,INK);c.setPixelColor(x1,y,INK);}
             }
-            c.drawText(6,98,MapLegend.FONT,lens==null?"1王城  2伯领":"北上");
-            c.drawText(6,113,MapLegend.FONT,lens==null?"3主教驻地":lens.caption());
+            c.drawText(6,98,MapLegend.FONT,lens==null && !imperial.contains(uuid)?"1王城  2伯领":"北上");
+            c.drawText(6,113,MapLegend.FONT,lens==null?(imperial.contains(uuid)?"帝国疆域":"3主教驻地"):lens.caption());
             drawn.put(uuid,revision);
         }catch(SQLException ex){throw new IllegalStateException(ex);}
     }

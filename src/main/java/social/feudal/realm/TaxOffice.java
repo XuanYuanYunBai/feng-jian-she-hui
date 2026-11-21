@@ -52,7 +52,11 @@ final class TaxOffice {
                 for(var t:realm.store.titles())migrate(t);
                 for(var d:realm.store.depots()){
                     Container stock=realm.fixtures.bin(d.x(),d.z(),"stock",d.id());
-                    if(stock!=null)stage(d,stock);
+                    if(stock!=null){
+                        if(realm.store.value("SELECT title FROM assessment WHERE depot=? AND period=?",d.id(),ledger.period())==null && count(WarehouseFixtures.inventory(stock))>0)
+                            openPeriod(ledger.period());
+                        stage(d,stock);
+                    }
                 }
             }
             for(var d:realm.store.depots()){
@@ -154,18 +158,23 @@ final class TaxOffice {
     private void collect(Player p,String[] a)throws SQLException{
         usage(a.length==2 || a.length==3,"collect 税仓ID [税期]");
         var d=ledger.depot(a[1]);nearby(p,realm.markers.counter(d.x(),d.z()));
-        String title=ledger.collectRight(d,p.getUniqueId().toString());
+        int period=a.length==3?Integer.parseInt(a[2]):ledger.period();
+        String title=ledger.account(d.id(),period).title();
+        require(realm.store.title(title).seal().equals(p.getUniqueId().toString()),"请由本税期期初权利人的持印人提运");
         var bin=realm.fixtures.bin(d.x(),d.z(),"stock",d.id());require(bin!=null,"请登记产地仓箱");
         stage(d,bin);var inv=WarehouseFixtures.inventory(bin);
-        int period=a.length==3?Integer.parseInt(a[2]):ledger.period(),amount=0;
+        int amount=0;
         for(int slot=0;slot<inv.getSize();slot++){
             var item=inv.getItem(slot);String id=id(item);
             if(id==null || realm.store.number("SELECT count(*) FROM crate WHERE id=? AND depot=? AND period=? AND received=0",id,d.id(),period)==0)continue;
             if(p.getInventory().firstEmpty()<0)break;
-            realm.store.update("UPDATE crate SET title=?,carrier=? WHERE id=?",title,p.getUniqueId().toString(),id);
+            realm.store.update("UPDATE crate SET carrier=? WHERE id=?",p.getUniqueId().toString(),id);
             inv.setItem(slot,null);p.getInventory().addItem(item);amount+=ledger.crate(id).amount();
         }
         require(amount>0,"仓箱中没有可提的当期税箱，或背包已满");p.sendMessage("已从产地仓箱提取 "+amount+" 份小麦，请随身运往公库");
+    }
+    boolean canRead(CommandSender sender,String title)throws SQLException{
+        return sender.hasPermission("feudal.realm.admin") || sender instanceof Player p && realm.store.title(title).seal().equals(p.getUniqueId().toString());
     }
     void execute(CommandSender s,String[] a)throws SQLException{
         switch(a[0]){
@@ -173,11 +182,11 @@ final class TaxOffice {
                 int period=a.length==2?Integer.parseInt(a[1]):ledger.period();
                 for(var d:realm.store.depots()){
                     if(realm.store.value("SELECT title FROM assessment WHERE depot=? AND period=?",d.id(),period)==null)continue;
-                    var row=ledger.account(d.id(),period);
+                    var row=ledger.account(d.id(),period);if(!canRead(s,row.title()))continue;
                     s.sendMessage(d.name()+" · 应收 "+row.due()+"  自动份额 "+ledger.quota(d.id(),period)+"  尚待装箱 "+row.remaining());
                 }
             }
-            case "treasury" -> {usage(a.length==2,"treasury 头衔ID");var t=realm.store.title(a[1]);s.sendMessage(t.name()+"公库 · "+balance(t));}
+            case "treasury" -> {usage(a.length==2,"treasury 头衔ID");var t=realm.store.title(a[1]);require(canRead(s,t.id()),"公库仅向本领持印人开放");s.sendMessage(t.name()+"公库 · "+balance(t));}
             case "collect" -> collect(player(s),a);
             case "reissue" -> s.sendMessage("请在原仓箱、承运人背包或驮骡上查找原税箱。潜行右键脚夫可接运。");
             case "deposit" -> {

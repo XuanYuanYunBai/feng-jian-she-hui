@@ -136,6 +136,7 @@ final class Succession {
         s.atomic(()->{
             var t=s.title(id);require(t.parent()!=null,"须有帝国上级");
             var empire=s.title(t.parent());require(empire.rank().equals("皇帝"),"限帝国直接封臣");
+            if(kind.equals("王号"))require(s.politics.member(Politics.EMPIRE,id),"帝国王号仅适用于成员国");
             require(Set.of("王号","独立").contains(kind) && !terms.isBlank() && terms.length()<=120,"请写明王号或独立及交换条件（1–120字）");
             boolean crown=kind.equals("王号");
             require(t.rank().equals(crown?"公爵":"国王"),crown?"仅直属公爵可议帝内王号":"仅帝内王国可议独立和约");
@@ -158,7 +159,7 @@ final class Succession {
                 if(crown)s.update("UPDATE title SET rank='国王' WHERE id=?",id);
                 else {
                     s.update("UPDATE title SET parent=NULL WHERE id=?",id);
-                    s.politics.removeMember(Politics.EMPIRE,id);
+                    if(s.politics.member(Politics.EMPIRE,id))s.politics.removeMember(Politics.EMPIRE,id);
                 }
                 record(id,r.getString(1)+"生效 · "+r.getString(2));
             }

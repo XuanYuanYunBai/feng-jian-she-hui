@@ -108,6 +108,8 @@ final class MillOffice implements Listener {
                 usage(a.length==3 && Set.of("收麦","补种","磨粉").contains(a[2]),"farmjob 磨坊 收麦|补种|磨粉");
                 var m=get(a[1]);local(p,m);require(usable(m),"设施损坏，请复验入口、仓桶与动力");
                 int season=realm.manors.register.season();
+                if(a[2].equals("收麦"))require(season%4==2,"秋季可派收割工，当前为"+seasonName(season));
+                if(a[2].equals("补种"))require(season%4==0,"春季可派播种工，当前为"+seasonName(season));
                 require(count("SELECT count(*) FROM farmhand WHERE mill=? AND season=? AND "+(a[2].equals("磨粉")?"role='磨粉'":"role<>'磨粉'"),m.id(),season)<(a[2].equals("磨粉")?1:m.workers()),"本季相应工位已分配");
                 require(count("SELECT count(*) FROM farmhand JOIN mill ON mill.id=farmhand.mill WHERE manor=? AND season=?",m.manor(),season)<realm.manors.register.manor(m.manor()).households(),"庄内本季已无空闲劳力");
                 s.update("INSERT INTO farmhand(mill,season,role,quota,status) VALUES(?,?,?,64,'已派工')",m.id(),season,a[2]);page(p,m);
@@ -120,9 +122,10 @@ final class MillOffice implements Listener {
         var id=s.value("SELECT id FROM mill WHERE x=? AND y=? AND z=?",b.getX(),b.getY(),b.getZ());
         if(id!=null){e.setCancelled(true);page(e.getPlayer(),get(id));}
     }
+    private static String seasonName(int index){return List.of("春","夏","秋","冬").get(Math.floorMod(index,4))+"季";}
     private void page(Player p,Mill m)throws SQLException{
         var body=new ArrayList<io.papermc.paper.registry.data.dialog.body.DialogBody>();
-        body.add(text("庄园　"+realm.manors.register.manor(m.manor()).name()+"　｜　"+m.tier()+" 级水磨"));
+        body.add(text(seasonName(realm.manors.register.season())+"　｜　庄园　"+realm.manors.register.manor(m.manor()).name()+"　｜　"+m.tier()+" 级水磨"));
         body.add(text("田务路程 "+m.radius()+" 格　｜　登记 "+count("SELECT count(*) FROM field WHERE mill=?",m.id())+" / "+m.capacity()+" 格　｜　田工 "+m.workers()+" 席"));
         for(var line:realm.diplomacy.column("SELECT role || ' · ' || status || '　剩余工时 ' || quota FROM farmhand WHERE mill=? AND season=? ORDER BY id",m.id(),realm.manors.register.season()))body.add(text(line));
         show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一户收麦","realm farmjob "+m.id()+" 收麦"),command("派一户补种","realm farmjob "+m.id()+" 补种"),

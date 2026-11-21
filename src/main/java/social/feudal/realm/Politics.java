@@ -26,6 +26,9 @@ final class Politics {
                 CREATE TABLE IF NOT EXISTS signatory(treaty TEXT REFERENCES treaty(id),nation TEXT REFERENCES nation(id),
                 signer TEXT,PRIMARY KEY(treaty,nation))""");
             s.update("""
+                CREATE TABLE IF NOT EXISTS organisation_signature(treaty TEXT REFERENCES treaty(id),org TEXT REFERENCES association(id),
+                delegate TEXT REFERENCES nation(id),signer TEXT,PRIMARY KEY(treaty,org))""");
+            s.update("""
                 CREATE TABLE IF NOT EXISTS motion(id INTEGER PRIMARY KEY,org TEXT REFERENCES association(id),kind TEXT NOT NULL,
                 subject TEXT NOT NULL,terms TEXT NOT NULL,state TEXT NOT NULL DEFAULT '表决中')""");
             s.update("""
@@ -62,12 +65,13 @@ final class Politics {
         return s.number("SELECT count(*) FROM member WHERE org=? AND nation=?",org,nation)>0;
     }
     boolean imperial(String title)throws SQLException{
+        require(s.value("SELECT title FROM affiliation WHERE title=?",title)!=null,"未登记的领地");
         String country=nation(title);return country==null || member(EMPIRE,country);
     }
     void newNation(String id,boolean imperial,boolean elector)throws SQLException{
         s.update("INSERT INTO nation VALUES(?)",id);
         s.update("INSERT INTO affiliation VALUES(?,?)",id,id);
-        if(imperial)s.update("INSERT INTO member VALUES(?,?,1,?)",EMPIRE,id,elector?1:0);
+        if(imperial)s.update("INSERT INTO member VALUES(?,?,?,?)",EMPIRE,id,elector?1:0,elector?1:0);
     }
     void attach(RealmStore.Title t)throws SQLException{
         boolean polity=t.parent()==null || "crown".equals(t.parent()) &&
@@ -91,6 +95,11 @@ final class Politics {
             represents(proposer,actor);
             s.update("INSERT INTO treaty(id,name,kind,terms) VALUES(?,?,?,?)",id,name,kind,terms);
             for(String country:countries){
+                if(country.startsWith("@")){
+                    require(kind.equals("条约"),"首发常设组织由国家创设，国际组织可作为条约缔约方");
+                    String org=country.substring(1);active(org);
+                    s.update("INSERT INTO organisation_signature(treaty,org) VALUES(?,?)",id,org);continue;
+                }
                 require(s.value("SELECT id FROM nation WHERE id=?",country)!=null,"没有这个国家 "+country);
                 s.update("INSERT INTO signatory VALUES(?,?,?)",id,country,country.equals(proposer)?actor:null);
             }
@@ -103,16 +112,35 @@ final class Politics {
             require(s.update("""
                 UPDATE signatory SET signer=? WHERE treaty=? AND nation=? AND signer IS NULL
                 AND EXISTS(SELECT 1 FROM treaty WHERE id=? AND state='待批准')""",actor,id,country,id)==1,"该国没有待签文书");
-            require(s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer=? AND nation<>?",id,actor,country)==0,"不能代表双方签署同一文书");
-            if(s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer IS NULL",id)==0){
-                s.update("UPDATE treaty SET state='生效' WHERE id=?",id);
-                if(!"条约".equals(s.value("SELECT kind FROM treaty WHERE id=?",id))){
-                    s.update("INSERT INTO association(id,name,kind,charter) SELECT id,name,kind,terms FROM treaty WHERE id=?",id);
-                    s.update("INSERT INTO member SELECT treaty,nation,1,0 FROM signatory WHERE treaty=?",id);
-                }
-                log(id,country,"缔约各国完成批准");
-            }else log(null,country,"批准 "+id);
+            require(s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer=? AND nation<>?",id,actor,country)==0 && s.number("SELECT count(*) FROM organisation_signature WHERE treaty=? AND signer=?",id,actor)==0,"不能代表双方签署同一文书");
+            finishTreaty(id,country);
             return null;
+        });
+    }
+    private void finishTreaty(String id,String party)throws SQLException{
+        if(unsigned(id)>0){log(null,party,"批准 "+id);return;}
+        s.update("UPDATE treaty SET state='生效' WHERE id=?",id);
+        if(!"条约".equals(s.value("SELECT kind FROM treaty WHERE id=?",id))){
+            s.update("INSERT INTO association(id,name,kind,charter) SELECT id,name,kind,terms FROM treaty WHERE id=?",id);
+            s.update("INSERT INTO member SELECT treaty,nation,1,0 FROM signatory WHERE treaty=?",id);
+        }
+        log(id,party,"缔约各方完成批准");
+    }
+    int unsigned(String id)throws SQLException{
+        return s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer IS NULL",id)
+                +s.number("SELECT count(*) FROM organisation_signature WHERE treaty=? AND signer IS NULL",id);
+    }
+    void signOrganisation(String id,String org,String actor)throws SQLException{
+        s.atomic(()->{
+            active(org);
+            String delegate=s.value("SELECT delegate FROM organisation_signature WHERE treaty=? AND org=? AND signer IS NULL",id,org);
+            require(delegate!=null && member(org,delegate),"此约尚无有效组织授权");
+            if(org.equals(EMPIRE))new Charters(s).acts("crown",actor);
+            else represents(delegate,actor);
+            require(s.number("SELECT count(*) FROM signatory WHERE treaty=? AND signer=?",id,actor)==0 &&
+                    s.number("SELECT count(*) FROM organisation_signature WHERE treaty=? AND signer=?",id,actor)==0,"不能代表多方签署同一文书");
+            require(s.update("UPDATE organisation_signature SET signer=? WHERE treaty=? AND org=? AND signer IS NULL",actor,id,org)==1,"组织已经签署");
+            log(org,null,"依议会授权签署文书 "+id);finishTreaty(id,null);return null;
         });
     }
     void active(String org)throws SQLException{
@@ -122,10 +150,21 @@ final class Politics {
     int propose(String org,String country,String actor,String kind,String subject,String terms)throws SQLException{
         return s.atomic(()->{
             active(org);represents(country,actor);wording(terms,200);
-            require(Set.of("接纳","议决","修章","选帝").contains(kind),"未知议案种类");
+            require(Set.of("接纳","议决","修章","选帝","退帝","调停","授席","选侯特许","外交授权").contains(kind),"未知议案种类");
             if(kind.equals("接纳")){
                 require(country.equals(subject) && !member(org,country),"申请国须自行申请加入");
             }else require(member(org,country),"此国没有提案资格");
+            if(kind.equals("外交授权")){
+                require(member(org,terms),"受托国须是组织成员");
+                require(s.number("SELECT count(*) FROM organisation_signature WHERE treaty=? AND org=? AND signer IS NULL",subject,org)==1,"该组织未列为待签方");
+            }
+            if(Set.of("授席","选侯特许").contains(kind)){
+                require(org.equals(EMPIRE) && member(org,subject),"须提名一个帝国成员国");
+                String privilege=kind.equals("授席")?"seat":"elector";
+                require(s.number("SELECT "+privilege+" FROM member WHERE org=? AND nation=?",org,subject)==0,"已享有这项资格");
+            }
+            if(kind.equals("调停"))require(org.equals(EMPIRE) && country.equals(terms) && s.value("SELECT id FROM crossing WHERE id=?",subject)!=null,"请以本国为当事人向帝国提交具名桥亭争端");
+            if(kind.equals("退帝"))require(org.equals(EMPIRE) && country.equals(subject),"仅本国可提请退出帝国");
             if(kind.equals("选帝")){
                 require(!Succession.isPlayer(s.title("crown").lawful()),"帝位仍有在任皇帝");
                 require(org.equals(EMPIRE) && member(org,subject) && Succession.isPlayer(s.title(subject).lawful()),"请推举帝国成员的在任玩家君主");
@@ -176,11 +215,21 @@ final class Politics {
             int total=s.number("SELECT count(*) FROM ballot WHERE motion=?",motion);
             int yes=s.number("SELECT count(*) FROM ballot WHERE motion=? AND vote=1",motion);
             int no=s.number("SELECT count(*) FROM ballot WHERE motion=? AND vote=0",motion);
-            int needed=kind.equals("修章")?Math.ceilDiv(total*2,3):total/2+1;
+            int needed=Set.of("修章","选侯特许").contains(kind)?Math.ceilDiv(total*2,3):total/2+1;
             if(yes>=needed){
                 if(kind.equals("接纳")){
-                    s.update("INSERT OR IGNORE INTO member VALUES(?,?,1,0)",org,sub);
+                    s.update("INSERT OR IGNORE INTO member VALUES(?,?,?,0)",org,sub,org.equals(EMPIRE)?0:1);
                     s.update("UPDATE association SET state='有效',deadline=NULL WHERE id=? AND (SELECT count(*) FROM member WHERE org=?)>=2",org,org);
+                }
+                if(kind.equals("外交授权"))s.update("""
+                    UPDATE organisation_signature SET delegate=(SELECT terms FROM motion WHERE id=?)
+                    WHERE treaty=? AND org=? AND signer IS NULL""",motion,sub,org);
+                if(kind.equals("授席"))s.update("UPDATE member SET seat=1 WHERE org=? AND nation=?",org,sub);
+                if(kind.equals("选侯特许"))s.update("UPDATE member SET seat=1,elector=1 WHERE org=? AND nation=?",org,sub);
+                if(kind.equals("退帝")){
+                    s.update("DELETE FROM member WHERE org=? AND nation=?",EMPIRE,sub);
+                    s.update("UPDATE motion SET state='席位变动，须重提' WHERE org=? AND id<>? AND state='表决中'",EMPIRE,motion);
+                    log(EMPIRE,sub,"依议决退出帝国，其他封契与债务独立履行");
                 }
                 if(kind.equals("修章"))s.update("UPDATE association SET charter=(SELECT terms FROM motion WHERE id=?) WHERE id=?",motion,org);
                 if(kind.equals("选帝")){

@@ -87,7 +87,7 @@ final class FiscalLedger {
         s.atomic(()->{
             var a=account(d.id(),period);
             if(a.remaining()==0)return null;
-            String title=right(d);
+            String title=a.title();
             int auto=Math.min(a.remaining(),quota(d.id(),period));
             for(boolean courier:List.of(true,false)){
                 int amount=courier?auto:a.remaining()-auto;
