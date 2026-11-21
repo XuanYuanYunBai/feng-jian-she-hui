@@ -19,12 +19,14 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final JavaPlugin plugin;
     final World world;
     final RealmStore store;
+    final TaxOffice taxes;
     private MapView view;
     private PoliticalMap renderer;
 
     public RealmService(JavaPlugin plugin,World world,Path path) throws SQLException {
         this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
+        taxes=new TaxOffice(this);
         if(store.ready()) restoreMap();
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
@@ -59,6 +61,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             String action=a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
             if(action.equals("help")){
                 s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
+                s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("管理员 /realm init 在线君主名  以主世界出生区块建立帝国");
                 return true;
             }
@@ -67,10 +70,11 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 usage(a.length==2,"init 在线君主名");
                 var l=world.getSpawnLocation();
                 store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,actor(a[1]));
-                restoreMap();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
+                taxes.ledger.begin(1);restoreMap();s.sendMessage("河湾帝国已建国。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> atlas(s);
                 case "map" -> {
                     Player p=player(s);inWorld(p);
@@ -120,6 +124,6 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     }
     @Override public void close()throws SQLException{
         if(view!=null && renderer!=null)view.removeRenderer(renderer);
-        store.close();
+        taxes.saveTime();store.close();
     }
 }
