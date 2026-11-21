@@ -20,7 +20,7 @@ final class PoliticalMap extends MapRenderer {
     void invalidate(){revision++;}
     void forget(UUID viewer){drawn.remove(viewer);lenses.remove(viewer);}
     void local(UUID viewer,int x,int z){
-        lenses.put(viewer,new Lens(new Charters.Bounds(x-12,z-12,x+12,z+12),null,"25 x 25 chunks"));
+        lenses.put(viewer,new Lens(new Charters.Bounds(x-12,z-12,x+12,z+12),null,"25 x 25 区块"));
         drawn.remove(viewer);
     }
     void select(UUID viewer,Charters.Bounds b,String caption){
@@ -44,7 +44,7 @@ final class PoliticalMap extends MapRenderer {
             double scale=Math.min(116.0/w,72.0/h);
             int left=(int)((128-w*scale)/2),top=20+(int)((72-h*scale)/2);
             for(int y=0;y<128;y++)for(int x=0;x<128;x++)c.setPixelColor(x,y,PAPER);
-            c.drawText(6,6,MinecraftFont.Font,lens==null?"IMPERIAL ATLAS":"DISTRICT SURVEY");
+            c.drawText(6,4,MapLegend.FONT,lens==null?"帝国疆域图":"地方勘界图");
             Map<String,Integer> key=new HashMap<>();
             for(int i=0;i<titles.size();i++)key.put(titles.get(i).id(),i);
             for(var l:lands){
@@ -69,9 +69,8 @@ final class PoliticalMap extends MapRenderer {
                 for(int x=x0;x<=x1;x++){c.setPixelColor(x,y0,INK);c.setPixelColor(x,y1,INK);}
                 for(int y=y0;y<=y1;y++){c.setPixelColor(x0,y,INK);c.setPixelColor(x1,y,INK);}
             }
-            c.drawText(6,95,MinecraftFont.Font,lens==null?"1 Crown   2 March":"N ^   Boundaries");
-            c.drawText(6,106,MinecraftFont.Font,lens==null?"3 Bishopric":lens.caption());
-            c.drawText(6,117,MinecraftFont.Font,"/realm atlas");
+            c.drawText(6,98,MapLegend.FONT,lens==null?"1王城  2伯领":"北上");
+            c.drawText(6,113,MapLegend.FONT,lens==null?"3主教驻地":lens.caption());
             drawn.put(uuid,revision);
         }catch(SQLException ex){throw new IllegalStateException(ex);}
     }

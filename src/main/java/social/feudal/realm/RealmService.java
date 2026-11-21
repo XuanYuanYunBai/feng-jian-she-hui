@@ -18,10 +18,10 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final JavaPlugin plugin;
     final World world;
     final RealmStore store;
-    final RealmBooks books;
+    final RealmDialogs dialogs;
     final Council council;
     final CharterOffice charters;
-    private final DepotMarkers markers;
+    final DepotMarkers markers;
     final TaxOffice taxes;
     private MapView view;
     private PoliticalMap renderer;
@@ -29,7 +29,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     public RealmService(JavaPlugin plugin,World world,Path path) throws SQLException {
         this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
-        books=new RealmBooks(this);
+        dialogs=new RealmDialogs(this);
         charters=new CharterOffice(this);
         taxes=new TaxOffice(this);
         council=new Council(this);
@@ -89,14 +89,19 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "visit","ledger","collect","reissue","deposit","treasury","gift" -> taxes.execute(s,a);
                 case "atlas" -> {
-                    if(s instanceof Player p)books.directory(p);
+                    if(s instanceof Player p)dialogs.directory(p,a.length==2?Integer.parseInt(a[1]):1);
                     else for(var t:store.titles())detail(s,t,t.x(),t.z());
                 }
-                case "brief" -> {usage(a.length==2,"brief 头衔ID");books.brief(player(s),store.title(a[1]));}
+                case "brief" -> {usage(a.length==2,"brief 头衔ID");dialogs.brief(player(s),store.title(a[1]));}
                 case "accounts" -> {
                     usage(a.length<=3,"accounts [税仓ID] [税期]");
                     if(a.length>=2)taxes.ledger.depot(a[1]);
-                    books.accounts(player(s),a.length==3?Integer.parseInt(a[2]):taxes.ledger.period(),a.length>=2?a[1]:"");
+                    if(a.length==1)dialogs.warehouses(player(s),taxes.ledger.period(),1);
+                    else dialogs.accounts(player(s),a.length==3?Integer.parseInt(a[2]):taxes.ledger.period(),a[1]);
+                }
+                case "warehouses" -> {
+                    usage(a.length==3,"warehouses 税期 页码");
+                    dialogs.warehouses(player(s),Integer.parseInt(a[1]),Integer.parseInt(a[2]));
                 }
                 case "map","local" -> {
                     Player p=player(s);inWorld(p);
@@ -115,9 +120,23 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                     usage(a.length==3,"depot 税仓ID 仓名");var p=player(s);inWorld(p);
                     var l=p.getLocation();store.foundDepot(p.getUniqueId().toString(),a[1],a[2],l.getBlockX()>>4,l.getBlockZ()>>4);
                     markers.refresh();s.sendMessage("税仓已登记，下个税期开始入账");
+                    markers.complete(taxes.ledger.depot(a[1]));
+                }
+                case "build" -> {
+                    var p=player(s);inWorld(p);var chunk=p.getLocation().getChunk();
+                    var d=store.depots().stream().filter(row->row.x()==chunk.getX() && row.z()==chunk.getZ()).findFirst()
+                            .orElseThrow(()->new IllegalArgumentException("此区块没有登记税仓"));
+                    String holder=store.title(store.owner(chunk.getX(),chunk.getZ())).seal();
+                    RealmStore.require(p.hasPermission("feudal.realm.admin") || p.getUniqueId().toString().equals(holder),"请由该领持印人补建");
+                    markers.complete(d);s.sendMessage("税仓已建成");
                 }
                 case "depots" -> {
-                    for(var d:store.depots())s.sendMessage(d.id()+" · "+d.name()+"  X "+(d.x()*16+8)+"  Z "+(d.z()*16+8));
+                    for(var d:store.depots()){
+                        if(world.isChunkLoaded(d.x(),d.z()) && markers.built(d)){
+                            var desk=markers.counter(d.x(),d.z());
+                            s.sendMessage(d.name()+" · 账台 "+desk.getBlockX()+"，"+desk.getBlockY()+"，"+desk.getBlockZ()+" · "+d.id());
+                        }else s.sendMessage(d.name()+" · 所在区块 "+d.x()+"，"+d.z()+" · "+d.id());
+                    }
                 }
                 default -> throw new IllegalArgumentException("未知操作，使用 /realm help");
             }

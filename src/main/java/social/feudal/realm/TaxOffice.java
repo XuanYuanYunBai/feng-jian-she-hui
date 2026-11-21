@@ -38,13 +38,17 @@ final class TaxOffice {
         } catch(SQLException ex){realm.plugin.getLogger().log(Level.SEVERE,"税期结算失败",ex);}
     }
     void saveTime()throws SQLException{realm.store.update("INSERT OR REPLACE INTO setting VALUES('seconds',?)",activeSeconds);}
-    // A depot occupies the surface at its marked chunk centre. No existing blocks are replaced.
     void nearby(Player p,int x,int z){
         realm.inWorld(p);var l=p.getLocation();
         int bx=x*16+8,bz=z*16+8;
-        require(Math.abs(l.getX()-bx-.5)<=5 && Math.abs(l.getZ()-bz-.5)<=5,"请亲赴库址 X "+bx+" Z "+bz);
-        int surface=realm.world.getHighestBlockYAt(bx,bz,HeightMap.MOTION_BLOCKING_NO_LEAVES)+1;
-        require(Math.abs(surface-l.getY())<=6,"请到库址地表交割");
+        require(Math.abs(l.getX()-bx)<=15 && Math.abs(l.getZ()-bz)<=15,"请亲赴税仓所在区块 "+x+"，"+z);
+        var desk=realm.markers.counter(x,z);
+        require(Math.abs(l.getX()-desk.getX()-.5)<=5 && Math.abs(l.getZ()-desk.getZ()-.5)<=5
+                && Math.abs(l.getY()-desk.getY())<=6,"请到库址地表账台交割");
+    }
+    boolean holdsCrate(Player p){
+        var item=p.getInventory().getItemInMainHand();
+        return item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(tag,PersistentDataType.STRING);
     }
     void execute(CommandSender s,String[] a)throws SQLException{
         switch(a[0]){
@@ -70,7 +74,7 @@ final class TaxOffice {
                 contents.getSnapshotInventory().setItem(0,new ItemStack(Material.WHEAT,c.amount()));
                 meta.setBlockState(contents);
                 meta.displayName(Component.text("封缄税箱 · "+c.amount()+" 份小麦"));
-                meta.lore(List.of(Component.text("来源 "+d.name()+" / 第 "+period+" 税期"),Component.text("在所属公库手持并执行 /realm deposit")));
+                meta.lore(List.of(Component.text("来源 "+d.name()+" / 第 "+period+" 税期"),Component.text("运回所属公库，手持税箱右键账台交付")));
                 meta.getPersistentDataContainer().set(tag,PersistentDataType.STRING,c.id());box.setItemMeta(meta);
                 p.getInventory().addItem(box);s.sendMessage("领到实物税箱 · "+c.amount()+" 份小麦，请运回所属公库");
             }

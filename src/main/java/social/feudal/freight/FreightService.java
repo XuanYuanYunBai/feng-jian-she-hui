@@ -2,11 +2,16 @@ package social.feudal.freight;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Locale;
+import io.papermc.paper.registry.data.dialog.ActionButton;
+import io.papermc.paper.registry.data.dialog.action.DialogAction;
+import io.papermc.paper.registry.data.dialog.body.DialogBody;
+import io.papermc.paper.registry.data.dialog.input.DialogInput;
+import net.kyori.adventure.text.event.ClickCallback;
+import static social.feudal.ui.Menus.*;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.ClickEvent;
-import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -108,7 +113,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 main(() -> {
                     road.show(t, next);
                     if (next == r.length()) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.y()
-                            + "," + r.dz() + "，请到站持书右键签收");
+                            + "," + r.dz() + "，请到站空手潜行右键签收");
                     return null;
                 });
             }
@@ -128,7 +133,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             return true;
         }
         if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
-            sender.sendMessage("先用 /freight routes 找到公共站桶。把一叠货放入起点桶第一格，持普通书右键站桶即可开单。到站后由收货人持书右键签收。");
+            sender.sendMessage("先用 /freight routes 找到公共站桶。把一叠货放入起点桶第一格，空手潜行右键站桶即可填单或签收。");
             return true;
         }
         String action = args[0].toLowerCase(Locale.ROOT);
@@ -259,8 +264,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     @EventHandler(ignoreCancelled = true)
     public void inspectStation(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND || event.getAction() != Action.RIGHT_CLICK_BLOCK
-                || event.getItem() == null || event.getItem().getType() != Material.BOOK
                 || !event.getPlayer().hasPermission("feudal.freight.use")) return;
+        var held = event.getPlayer().getInventory().getItemInMainHand().getType();
+        if (held != Material.BOOK && !(held.isAir() && event.getPlayer().isSneaking())) return;
         var block = event.getClickedBlock();
         if (block == null || !road.registered(block)) return;
         event.setCancelled(true);
@@ -271,24 +277,44 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         ledger.execute(() -> {
             try {
                 Trip trip = store.active();
-                var message = Component.text("公共货站 (" + x + "," + y + "," + z + ")", NamedTextColor.GOLD);
-                for (Route r : store.routes()) {
-                    if (!r.world().equals(world) || y != r.y()) continue;
-                    if (x == r.sx() && z == r.sz()) {
-                        String bill = UUID.randomUUID().toString();
-                        message = message.append(Component.text("\n" + r.name() + " → " + r.dx() + "," + y + "," + r.dz()
-                                + "  [填写货单]", NamedTextColor.GREEN).clickEvent(
-                                ClickEvent.suggestCommand("/freight send " + r.name() + " " + bill + " ")));
+                var routes = store.routes();
+                String description = trip==null ? "" : describe(trip);
+                main(() -> {
+                    if (!player.isOnline()) return null;
+                    var buttons = new ArrayList<ActionButton>();
+                    var body = new ArrayList<DialogBody>();
+                    var inputs = new ArrayList<DialogInput>();
+                    body.add(text("站址　" + x + "，" + y + "，" + z));
+                    for (Route r : routes) {
+                        if (!r.world().equals(world) || y!=r.y()) continue;
+                        if (x==r.sx() && z==r.sz()) {
+                            String bill = UUID.randomUUID().toString();
+                            if(inputs.isEmpty()) inputs.add(DialogInput.text("recipient",200,Component.text("收货人（留空为本人）"),true,"",16,null));
+                            var action = DialogAction.customClick((reply, viewer) -> {
+                                if (!(viewer instanceof Player signer) || !signer.getUniqueId().equals(player.getUniqueId())) return;
+                                String name = reply.getText("recipient");
+                                String recipient = name==null ? "" : name.strip();
+                                if (!recipient.isEmpty() && !recipient.matches("[A-Za-z0-9_]{1,16}")) {
+                                    signer.sendMessage("请输入有效的在线玩家名");return;
+                                }
+                                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                                    if(signer.isOnline()) signer.performCommand("freight send " + r.name() + " " + bill
+                                            + (recipient.isEmpty()?"":" "+recipient));
+                                });
+                            }, ClickCallback.Options.builder().uses(1).build());
+                            buttons.add(ActionButton.create(Component.text("发往 "+r.dx()+"，"+r.dz()),
+                                    Component.text("货线 "+r.name()),128,action));
+                        }
+                        if (x==r.dx() && z==r.dz() && trip!=null && trip.route().equals(r)) {
+                            body.add(text(description));
+                            if (trip.phase()==Phase.ARRIVED && party.equals(trip.recipient()))
+                                buttons.add(command("签收货物","freight accept "+trip.id()));
+                        }
                     }
-                    if (x == r.dx() && z == r.dz() && trip != null && trip.route().equals(r)) {
-                        message = message.append(Component.text("\n" + describe(trip), NamedTextColor.WHITE));
-                        if (trip.phase() == Phase.ARRIVED && party.equals(trip.recipient()))
-                            message = message.append(Component.text("  [签收]", NamedTextColor.GREEN)
-                                    .clickEvent(ClickEvent.runCommand("/freight accept " + trip.id())));
-                    }
-                }
-                var response = message;
-                main(() -> { if (player.isOnline()) player.sendMessage(response); return null; });
+                    if(buttons.isEmpty())body.add(text("本站当前没有可办理的货单"));
+                    show(player,"公共货站",body,inputs,buttons,1);
+                    return null;
+                });
             } catch (Exception e) {
                 if (!closing) plugin.getLogger().log(Level.WARNING, "读取货站失败", e);
             }

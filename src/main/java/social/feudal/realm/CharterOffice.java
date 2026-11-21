@@ -33,14 +33,14 @@ final class CharterOffice {
                 boolean preview=a[0].equals("preview");
                 var b=bounds(a,6);String person=grantee(a[5]);
                 s.sendMessage((preview?"预览 · ":"授封完成 · ")+law.grant(actor,a[1],a[2],a[3],a[4],person,b,preview));
-                if(preview)realm.preview(p,b,a[2].equals("流官")?"After "+(law.areaHeld(person)+b.area())+"/256":"Grant "+b.area());
+                if(preview)realm.preview(p,b,a[2].equals("流官")?"合计 "+(law.areaHeld(person)+b.area())+"/256":"授予 "+b.area());
             }
             case "extend","estimate" -> {
                 usage(a.length==6,a[0]+" 流官领ID 西 北 东 南");
                 boolean preview=a[0].equals("estimate");
                 var b=bounds(a,2);
                 s.sendMessage((preview?"预览 · ":"追加完成 · ")+law.add(actor,a[1],b,preview));
-                if(preview)realm.preview(p,b,"After "+(law.areaHeld(realm.store.title(a[1]).seal())+b.area())+"/256");
+                if(preview)realm.preview(p,b,"合计 "+(law.areaHeld(realm.store.title(a[1]).seal())+b.area())+"/256");
             }
             case "estate" -> {
                 usage(a.length==7,"estate 上级 庄园|修院|磨坊|地租 新ID 名称 人名 税仓ID");
