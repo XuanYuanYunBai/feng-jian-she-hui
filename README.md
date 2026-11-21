@@ -1,14 +1,14 @@
-# La Société féodale · Minecraft 多人封建社会
+# 封建社会
 
-这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[战略玩法设计与下一轮验收](docs/slg-design.md)
+项目名称取自马克·布洛赫（Marc Bloch）的同名著作《封建社会》（La Société féodale）。这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[战略玩法设计与下一轮验收](docs/slg-design.md)
 
-当前可玩版本 **0.3.0 河湾帝国** 使用 Paper 26.3 build 257 与 Java 25。普通玩家可查看领界与封契、亲赴税仓、授地任官、处理官印争议，以及谈判帝内王号和独立。管理员使用 `/realm init 在线玩家名` 建国，玩家在游戏中输入 `/realm` 打开图册。
+当前可玩版本 **《封建社会》0.3.0** 使用 Paper 26.3 build 257 与 Java 25。普通玩家可查看领界与封契、亲赴税仓、授地任官、处理官印争议，以及谈判帝内王号和独立。管理员使用 `/realm init 在线玩家名` 建国，玩家在游戏中输入 `/realm` 打开图册。
 
-[下载插件](examples/imperial-atlas/feudal-survey-0.3.0.jar) · [试玩说明](examples/imperial-atlas/试玩说明.md) · [0.3.0 实服截图与测试](docs/paper-0.3.0-realm.md)
+[下载插件](examples/imperial-atlas/feudal-survey-0.3.0.jar) · [试玩说明](examples/imperial-atlas/试玩说明.md) · [随机主世界实测与截图](docs/paper-0.3.0-natural.md)
 
 旧版勘测与货运仍可在同服使用。[货运实测](docs/paper-0.2.0-freight.md) · [勘测实测](docs/paper-0.1.1-test.md)
 
-## 运输测试场景《河湾第一车》
+## 0.2.0 历史运输场景《河湾第一车》
 
 西岸与东岸之间的一座木桥用于复验在途位置、断桥停车和现场交割。测试世界预置两座站房、24 份小麦和修桥木料。[下载测试场景](examples/river-crossing/RiverCrossing-0.2.0.zip) · [操作说明](examples/river-crossing/试玩说明.md)
 

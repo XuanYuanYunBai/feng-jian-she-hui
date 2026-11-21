@@ -22,7 +22,7 @@ final class RealmBooks {
     void directory(Player p)throws SQLException{
         var titles=realm.store.titles();var pages=new ArrayList<Component>();
         for(int start=0;start<titles.size();start+=4){
-            var page=heading("帝国纹章院").append(Component.text("领地与封契\n\n"));
+            var page=heading("封建社会").append(Component.text("纹章院 · 领地与封契\n\n"));
             for(int i=start;i<Math.min(start+4,titles.size());i++){
                 var t=titles.get(i);
                 page=page.append(link((i+1)+" "+t.name(),"/realm brief "+t.id())).append(Component.newline());
