@@ -1,6 +1,6 @@
 name: FeudalSurvey
 main: social.feudal.survey.SurveyPlugin
-version: '0.5.2'
+version: '0.6.0'
 api-version: '26.3'
 description: 封建社会 · 领地、封契与实物税
 softdepend: [BlueMap]
@@ -14,7 +14,7 @@ commands:
     permission: feudal.survey.admin
   freight:
     description: 公共货线装货、运输与签收
-    usage: /freight routes | route 名称 起点X 桶Y 起点Z 终点X 终点Z | send 货线 运单号 [收货人] | status [运单号] | accept 运单号
+    usage: /freight routes | route|sail 名称 起X 起Y 起Z 终X 终Y 终Z | send 货线 运单号 [收货人] | status [运单号] | accept 运单号
     permission: feudal.freight.use
 permissions:
   feudal.realm.admin:

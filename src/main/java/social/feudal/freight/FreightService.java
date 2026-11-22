@@ -11,6 +11,7 @@ import io.papermc.paper.registry.data.dialog.input.DialogInput;
 import net.kyori.adventure.text.event.ClickCallback;
 import static social.feudal.ui.Menus.*;
 import java.util.UUID;
+import social.feudal.transport.HaulNetwork.Point;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Material;
 import org.bukkit.event.EventHandler;
@@ -39,10 +40,11 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     private String delayedTrip = "";
     private final boolean pauseWhenEmpty;
 
-    public FreightService(JavaPlugin plugin, World world, Path db,social.feudal.transport.TransportCrew crews) throws SQLException {
+    public FreightService(JavaPlugin plugin, World world, Path db,social.feudal.transport.TransportCrew crews,social.feudal.realm.RealmService realm) throws SQLException {
         this.plugin = plugin;
-        road = new FreightRoad(plugin, world,crews);
+        road = new FreightRoad(plugin, world,crews,realm);
         store = new FreightStore(db);
+        for(var r:store.routes())realm.recordRoute(r.name(),r.sea(),r.path());
         pauseWhenEmpty = plugin.getConfig().getBoolean("freight.pause-when-empty", true);
         plugin.getCommand("freight").setExecutor(this);
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
@@ -86,8 +88,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     private void returnHome(FreightStore.Return trip)throws Exception{
         var r=trip.route();int next=Math.max(0,trip.step()-1);
         if(main(()->{
-            road.hold(r,trip.step(),next);road.inspect(r,next);
+            road.hold(r,trip.step(),next);road.inspect(r,trip.step());road.inspect(r,next);
             var team=road.team(r);
+            if(!r.sea())road.realm.clearance(r.path().get(next),"返-"+trip.bill(),team);
             if(!road.walk(r,team,next))return false;
             if(next==0){road.rested(team);road.release();}
             return true;
@@ -107,6 +110,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                     road.inspect(r, t.step());
                     road.inspect(r, next);
                     var team=road.team(r);
+                    if(!r.sea())road.realm.clearance(r.path().get(next),"货-"+t.id(),team);
                     return road.walk(r,team,next);
                 }
                 case ARRIVED -> road.team(r).halt();
@@ -127,7 +131,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 if(!ready)return;
                 store.move(t);
                 main(() -> {
-                    if (next == r.length()) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.y()
+                    if (next == r.length()) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.dy()
                             + "," + r.dz() + "，请到站空手潜行右键签收");
                     return null;
                 });
@@ -153,7 +157,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             return true;
         }
         String action = args[0].toLowerCase(Locale.ROOT);
-        if (action.equals("route") && !sender.hasPermission("feudal.freight.admin")) {
+        if ((action.equals("route") || action.equals("sail")) && !sender.hasPermission("feudal.freight.admin")) {
             sender.sendMessage("登记公共货线需要 feudal.freight.admin 权限");
             return true;
         }
@@ -162,7 +166,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             String message;
             try {
                 message = switch (action) {
-                    case "route" -> register(args);
+                    case "route","sail" -> register(args);
                     case "routes" -> listRoutes();
                     case "equip" -> {
                         if(!(sender instanceof Player p) || args.length!=3)throw new IllegalArgumentException("用法 /freight equip 货线 speed|pack|mule");
@@ -191,13 +195,14 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     }
 
     private String register(String[] a) throws Exception {
-        if (a.length != 7) throw new IllegalArgumentException("用法：/freight route 名称 起点X 桶Y 起点Z 终点X 终点Z");
-        String name = key(a[1]);
-        if (store.route(name) != null) throw new IllegalArgumentException("货线名称已登记");
-        int sx = Integer.parseInt(a[2]), y = Integer.parseInt(a[3]), sz = Integer.parseInt(a[4]);
-        int dx = Integer.parseInt(a[5]), dz = Integer.parseInt(a[6]);
-        Route r = main(() -> road.register(name, sx, y, sz, dx, dz));
+        if(a.length!=7 && a.length!=8)throw new IllegalArgumentException("用法 /freight route|sail 名称 起X 起Y 起Z 终X 终Y 终Z");
+        String name=key(a[1]);
+        if(store.route(name)!=null)throw new IllegalArgumentException("货线名称已登记");
+        Point start=new Point(Integer.parseInt(a[2]),Integer.parseInt(a[3]),Integer.parseInt(a[4]));
+        Point end=new Point(Integer.parseInt(a[5]),a.length==7?start.y():Integer.parseInt(a[6]),Integer.parseInt(a[a.length-1]));
+        Route r=main(()->road.register(name,start,end,a[0].equalsIgnoreCase("sail")));
         store.register(r);
+        main(()->{road.realm.recordRoute(r.name(),r.sea(),r.path());return null;});
         return "已登记公共货线 " + name + "，全长 " + r.length() + " 格";
     }
 
@@ -205,7 +210,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         var list = store.routes();
         if (list.isEmpty()) return "尚未登记公共货线";
         var result = new StringBuilder("公共货线");
-        for (Route r : list) result.append("\n%s (%d,%d,%d) → (%d,%d,%d)".formatted(r.name(), r.sx(), r.y(), r.sz(), r.dx(), r.y(), r.dz()));
+        for (Route r : list) result.append("\n%s (%d,%d,%d) → (%d,%d,%d)".formatted(r.name(), r.sx(), r.y(), r.sz(), r.dx(), r.dy(), r.dz()));
         return result.toString();
     }
 
@@ -250,7 +255,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         if (!party.equals("console") && !party.equals(t.recipient())) throw new IllegalArgumentException("仅指定收货人可签收");
         if (t.phase() == Phase.DELIVERED || t.phase() == Phase.UNLOADING) return describe(t);
         if (t.phase() != Phase.ARRIVED) throw new IllegalArgumentException("承运脚夫尚未到站");
-        main(() -> { nearby(sender, t.route().dx(), t.route().y(), t.route().dz()); return null; });
+        main(() -> { nearby(sender, t.route().dx(), t.route().dy(), t.route().dz()); return null; });
         store.accept(t, party);
         return "已签收货单 " + t.id() + "，等待卸入终点桶第一格";
     }
@@ -273,7 +278,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
         String delay = t.id().equals(delayedTrip) && !stopped.isEmpty() ? " | 等候：" + stopped : "";
         String receipt = t.deliveredAt() == null ? "" : " | 签收人 " + t.signer() + " | " + t.deliveredAt() + " UTC";
         return "%s | %s | %s | %d %s | (%d,%d,%d) | %d/%d%s%s".formatted(t.id(), t.route().name(), state,
-                t.amount(), FreightRoad.goodsName(t.material()), t.route().x(t.step()), t.route().y()+1, t.route().z(t.step()), t.step(),
+                t.amount(), FreightRoad.goodsName(t.material()), t.route().x(t.step()), t.route().path().get(t.step()).y()+1, t.route().z(t.step()), t.step(),
                 t.route().length(), delay, receipt);
     }
 
@@ -308,8 +313,8 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                     var inputs = new ArrayList<DialogInput>();
                     body.add(text("站址　" + x + "，" + y + "，" + z));
                     for (Route r : routes) {
-                        if (!r.world().equals(world) || y!=r.y()) continue;
-                        if (x==r.sx() && z==r.sz()) {
+                        if (!r.world().equals(world)) continue;
+                        if (x==r.sx() && y==r.y() && z==r.sz()) {
                             body.add(text(road.capacity(r)));
                             for(var u:social.feudal.transport.TransportCrew.Upgrade.values())
                                 buttons.add(command(u.name+" · "+u.cost,"freight equip "+r.name()+" "+u.name().toLowerCase(Locale.ROOT)));
@@ -330,7 +335,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                             buttons.add(ActionButton.create(Component.text("发往 "+r.dx()+"，"+r.dz()),
                                     Component.text("货线 "+r.name()),128,action));
                         }
-                        if (x==r.dx() && z==r.dz() && trip!=null && trip.route().equals(r)) {
+                        if (x==r.dx() && y==r.dy() && z==r.dz() && trip!=null && trip.route().equals(r)) {
                             body.add(text(description));
                             if (trip.phase()==Phase.ARRIVED && party.equals(trip.recipient()))
                                 buttons.add(command("签收货物","freight accept "+trip.id()));

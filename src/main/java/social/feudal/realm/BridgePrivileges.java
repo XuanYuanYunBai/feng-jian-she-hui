@@ -48,7 +48,7 @@ final class BridgePrivileges {
             s.politics.represents(holder, actor);
             checkPassage(bridge, actor, now);
             s.update("UPDATE bridge_privilege SET remaining=remaining-1 WHERE id=?",grant);
-            s.update("INSERT INTO passage(bridge,owner,payer,paid,at) SELECT id,owner,?,0,? FROM crossing WHERE id=?",
+            s.update("INSERT INTO passage(bridge,owner,payer,paid,at,currency) SELECT id,owner,?,0,?,currency FROM crossing WHERE id=?",
                     actor,now,bridge);
             int passage = s.number("SELECT last_insert_rowid()");
             s.update("INSERT INTO privilege_use VALUES(?,?)",passage,grant);

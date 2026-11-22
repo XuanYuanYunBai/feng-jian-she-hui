@@ -109,7 +109,7 @@ public final class FootNavigation {
             double length=Math.hypot(x,z);if(length<.05)continue;
             double velocity=Math.min(length,walk.speed*.16);
             double y=body.getVelocity().getY();
-            if(next!=null && next.y>here.getY()+.5 && body.isOnGround())y=.42;
+            if((next!=null && next.y>here.getY()+.5 || walk.road && walk.goal.getY()>here.getY()+.5) && body.isOnGround())y=.42;
             float yaw=(float)Math.toDegrees(Math.atan2(-x,z));body.setRotation(yaw,0);body.setBodyYaw(yaw);
             body.setVelocity(new Vector(x/length*velocity,y,z/length*velocity));
         }

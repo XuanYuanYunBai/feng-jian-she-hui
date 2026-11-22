@@ -4,19 +4,37 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import social.feudal.transport.HaulNetwork.Point;
 
 final class FreightStore implements AutoCloseable {
     enum Phase { LOADING, TRAVEL, ARRIVED, UNLOADING, DELIVERED, CANCELLED }
 
-    record Route(String name, String world, int sx, int y, int sz, int dx, int dz, String sourceSeal, String destSeal) {
+    record Route(String name,String world,int sx,int y,int sz,int dx,int dy,int dz,String sourceSeal,String destSeal,
+                 boolean sea,List<Point> path) {
         Route {
-            int distance = Math.abs(dx - sx) + Math.abs(dz - sz);
-            if ((sx != dx && sz != dz) || distance < 1 || distance > 256)
-                throw new IllegalArgumentException("两站须在同一条水平直线上，相距 1 至 256 格");
+            path=List.copyOf(path);
+            if(path.size()<2 || path.size()>513)throw new IllegalArgumentException("运输段长度须为 1–512 格");
+            for(int i=1;i<path.size();i++){
+                Point a=path.get(i-1),b=path.get(i);
+                if(Math.abs(a.x()-b.x())+Math.abs(a.z()-b.z())!=1 || Math.abs(a.y()-b.y())>(sea?0:1))
+                    throw new IllegalArgumentException("路线上的相邻路格必须连通");
+            }
         }
-        int length() { return Math.abs(dx - sx) + Math.abs(dz - sz); }
-        int x(int step) { return sx + Integer.compare(dx, sx) * step; }
-        int z(int step) { return sz + Integer.compare(dz, sz) * step; }
+        Route(String name,String world,int sx,int y,int sz,int dx,int dz,String sourceSeal,String destSeal){
+            this(name,world,sx,y,sz,dx,y,dz,sourceSeal,destSeal,false,legacy(sx,y,sz,dx,dz));
+        }
+        private static List<Point> legacy(int sx,int y,int sz,int dx,int dz){
+            int length=Math.abs(sx-dx)+Math.abs(sz-dz);
+            if((sx!=dx && sz!=dz)||length<1||length>256)throw new IllegalArgumentException("旧版直线路径无效");
+            var cells=new ArrayList<Point>();
+            for(int i=0;i<=length;i++)cells.add(new Point(sx+i*Integer.compare(dx,sx),y,sz+i*Integer.compare(dz,sz)));
+            return cells;
+        }
+        int length(){return path.size()-1;}
+        int x(int step){return path.get(step).x();}
+        int z(int step){return path.get(step).z();}
+        Point start(){return new Point(sx,y,sz);}
+        Point end(){return new Point(dx,dy,dz);}
     }
 
     record Trip(String id, Route route, String sender, String recipient, byte[] cargo, String material, int amount,
@@ -41,22 +59,40 @@ final class FreightStore implements AutoCloseable {
                     phase TEXT NOT NULL CHECK(phase IN ('LOADING','TRAVEL','ARRIVED','UNLOADING','DELIVERED','CANCELLED')),
                     step INTEGER NOT NULL DEFAULT 0, signer TEXT, delivered_at TEXT)
                     """);
+            try(var columns=st.executeQuery("SELECT count(*) FROM pragma_table_info('routes') WHERE name='path'")){
+                if(columns.getInt(1)==0){
+                    try(var alter=db.createStatement()){alter.execute("ALTER TABLE routes ADD COLUMN path TEXT");}
+                }
+            }
             st.execute("CREATE TABLE IF NOT EXISTS crew_return(route TEXT PRIMARY KEY REFERENCES routes(name),step INTEGER NOT NULL)");
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_cart ON trips((1)) WHERE phase NOT IN ('DELIVERED','CANCELLED')");
         } catch (SQLException e) { db.close(); throw e; }
     }
 
     void register(Route r) throws SQLException {
-        try (var st = db.prepareStatement("INSERT INTO routes VALUES(?,?,?,?,?,?,?,?,?)")) {
+        try (var st = db.prepareStatement("INSERT INTO routes(name,world,sx,y,sz,dx,dz,source_seal,dest_seal,path) VALUES(?,?,?,?,?,?,?,?,?,?)")) {
             st.setString(1, r.name); st.setString(2, r.world);
             st.setInt(3, r.sx); st.setInt(4, r.y); st.setInt(5, r.sz);
             st.setInt(6, r.dx); st.setInt(7, r.dz);
             st.setString(8, r.sourceSeal); st.setString(9, r.destSeal);
+            var points=new java.util.StringJoiner(";");
+            for(var p:r.path)points.add(p.x()+","+p.y()+","+p.z());
+            st.setString(10,r.dy+"|"+(r.sea?"water":"road")+"|"+points);
             st.executeUpdate();
         }
     }
 
     private Route readRoute(ResultSet r) throws SQLException {
+        String encoded=r.getString("path");
+        if(encoded!=null){
+            var parts=encoded.split("[|]",3);var path=new ArrayList<Point>();
+            for(String entry:parts[2].split(";")){
+                var xyz=entry.split(",");path.add(new Point(Integer.parseInt(xyz[0]),Integer.parseInt(xyz[1]),Integer.parseInt(xyz[2])));
+            }
+            return new Route(r.getString("name"),r.getString("world"),r.getInt("sx"),r.getInt("y"),r.getInt("sz"),
+                    r.getInt("dx"),Integer.parseInt(parts[0]),r.getInt("dz"),r.getString("source_seal"),r.getString("dest_seal"),
+                    parts[1].equals("water"),path);
+        }
         return new Route(r.getString("name"), r.getString("world"), r.getInt("sx"), r.getInt("y"), r.getInt("sz"),
                 r.getInt("dx"), r.getInt("dz"), r.getString("source_seal"), r.getString("dest_seal"));
     }
@@ -120,10 +156,10 @@ final class FreightStore implements AutoCloseable {
         }catch(SQLException | RuntimeException ex){db.rollback();throw ex;}
         finally{db.setAutoCommit(true);}
     }
-    record Return(Route route,int step){}
+    record Return(Route route,int step,String bill){}
     Return returning()throws SQLException{
-        try(var q=db.prepareStatement("SELECT route,step FROM crew_return LIMIT 1");var r=q.executeQuery()){
-            return r.next()?new Return(route(r.getString(1)),r.getInt(2)):null;
+        try(var q=db.prepareStatement("SELECT route,step,(SELECT id FROM trips WHERE route=crew_return.route AND phase='DELIVERED' ORDER BY rowid DESC LIMIT 1) AS bill FROM crew_return LIMIT 1");var r=q.executeQuery()){
+            return r.next()?new Return(route(r.getString(1)),r.getInt(2),r.getString(3)):null;
         }
     }
     void walkedBack(Return trip)throws SQLException{

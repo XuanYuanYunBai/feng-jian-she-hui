@@ -45,8 +45,10 @@ def compare(db, layers):
 
     bridges = layers["feudal-crossings"]["markers"]
     seen = set()
-    for bridge, owner, fee, x, y, z in db.execute("""
-            SELECT c.id,t.name,c.fee,c.x,c.y,c.z FROM crossing c JOIN title t ON t.id=c.owner"""):
+    has_currency = db.execute("SELECT count(*) FROM pragma_table_info('crossing') WHERE name='currency'").fetchone()[0]
+    unit = "c.currency" if has_currency else "'GOLD'"
+    for bridge, owner, fee, x, y, z, currency in db.execute(f"""
+            SELECT c.id,t.name,c.fee,c.x,c.y,c.z,{unit} FROM crossing c JOIN title t ON t.id=c.owner"""):
         seen.add(bridge)
         marker = bridges.get(bridge, {})
         if marker.get("position") != {"x": x + .5, "y": y + 1.5, "z": z + .5}:
@@ -55,12 +57,30 @@ def compare(db, layers):
         grants = ["免税特许"] + [f"{name}　余 {remaining} 次" for name, remaining in db.execute("""
             SELECT t.name,g.remaining FROM bridge_privilege g JOIN title t ON t.id=g.holder
             WHERE g.bridge=? AND g.remaining>0 ORDER BY g.id""", (bridge,))]
-        expected = [f"收费权　{owner}", f"每次 {fee} 金粒"] + (grants if len(grants) > 1 else ["当前无免税特许"])
+        expected = [f"收费权　{owner}", f"每次 {fee} {'银币' if currency == 'SILVER' else '金粒'}"] + (grants if len(grants) > 1 else ["当前无免税特许"])
         if [html.unescape(line.removesuffix("</div>")) for line in lines[1:]] != expected:
             raise ValueError("桥亭公示与在册权利不一致 " + bridge)
     if set(bridges) != seen:
         raise ValueError("地图包含未登记的桥亭")
     return f"通过 · {len(mapped_land)} 个区块，{len(bridges)} 座桥亭，{len(expected_deeds)} 份待签文书"
+
+
+def check_routes(path, layers):
+    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as freight:
+        rows = freight.execute("SELECT name,sx,y,sz,dx,dz,path FROM routes").fetchall()
+    markers = layers["feudal-network"]["markers"]
+    if set(markers) != {row[0] for row in rows}:
+        raise ValueError("公布的货线名册有差异")
+    for name, sx, y, sz, dx, dz, saved in rows:
+        if saved is None:
+            delta_x, delta_z = (dx > sx) - (dx < sx), (dz > sz) - (dz < sz)
+            cells = [(sx + step * delta_x, y, sz + step * delta_z) for step in range(abs(dx-sx) + abs(dz-sz) + 1)]
+        else:
+            cells = [tuple(map(int, node.split(","))) for node in saved.split("|")[2].split(";")]
+        actual = [(v["x"], v["y"], v["z"]) for v in markers[name]["line"]]
+        if actual != [(x + .5, y + 1.15, z + .5) for x, y, z in cells]:
+            raise ValueError("地图路线与勘测的逐格坐标不符 " + name)
+    return f"，{len(rows)} 条实测货线"
 
 
 if __name__ == "__main__":
@@ -74,7 +94,10 @@ if __name__ == "__main__":
                 with urlopen(args.markers_url, timeout=5) as response:
                     markers = json.load(response)
                 db.execute("BEGIN")
-                print(compare(db, markers))
+                result = compare(db, markers)
+                if "feudal-network" in markers:
+                    result += check_routes(args.database.with_name("freight.sqlite"), markers)
+                print(result)
                 break
             except (ValueError, KeyError, OSError) as error:
                 if attempt == 8:

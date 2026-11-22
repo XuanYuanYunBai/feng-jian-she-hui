@@ -2,6 +2,10 @@ package social.feudal.freight;
 
 import java.util.HashSet;
 import java.util.Set;
+import social.feudal.transport.HaulNetwork;
+import social.feudal.transport.HaulNetwork.Point;
+import social.feudal.realm.RealmService;
+import org.bukkit.entity.Boat;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import org.bukkit.*;
@@ -18,6 +22,8 @@ import static social.feudal.freight.FreightStore.*;
 final class FreightRoad {
     record Goods(byte[] bytes, String material, int amount) {}
     private record Cell(int x, int z) {}
+    final RealmService realm;
+    final HaulNetwork net;
     final World world;
     private final Plugin plugin;
     private final NamespacedKey station, receipt;
@@ -25,7 +31,8 @@ final class FreightRoad {
     private final TransportCrew crews;
     private final NamespacedKey consignment;
 
-    FreightRoad(Plugin plugin, World world,TransportCrew crews) {
+    FreightRoad(Plugin plugin, World world,TransportCrew crews,RealmService realm) {
+        this.realm=realm;net=realm.roads;
         this.crews=crews;consignment=new NamespacedKey(plugin,"consignment");
         this.plugin = plugin;
         this.world = world;
@@ -37,18 +44,43 @@ final class FreightRoad {
         if (!world.getUID().toString().equals(r.world())) throw new IllegalArgumentException("货线属于另一个主世界");
     }
 
-    Route register(String name, int sx, int y, int sz, int dx, int dz) {
-        for (int v : new int[]{sx, sz, dx, dz})
-            if (Math.abs((long)v) > 29_999_980) throw new IllegalArgumentException("坐标超过世界范围");
-        if (y < world.getMinHeight() || (long)y + 3 >= world.getMaxHeight())
-            throw new IllegalArgumentException("站台高度超过世界范围");
-        var r = new Route(name, world.getUID().toString(), sx, y, sz, dx, dz, "", "");
-        var source = barrel(r.sx(), r.y(), r.sz(), null);
-        var dest = barrel(r.dx(), r.y(), r.dz(), null);
-        String a = seal(source), b = seal(dest);
-        staff(r,a);
-        world.save(true);
-        return new Route(name, r.world(), sx, y, sz, dx, dz, a, b);
+    Route register(String name, Point start, Point end, boolean sea) {
+        for(Point p:java.util.List.of(start,end)){
+            if(Math.abs((long)p.x())>29_999_980 || Math.abs((long)p.z())>29_999_980 || !net.loaded(p))
+                throw new IllegalArgumentException("请先到实地加载两座货站及沿线区块");
+        }
+        var source=barrel(start.x(),start.y(),start.z(),null);
+        var dest=barrel(end.x(),end.y(),end.z(),null);
+        Point first=sea?net.berth(start):start,last=sea?net.berth(end):end;
+        var path=net.survey(first,last,sea,!sea);
+        if(path.size()<2 || (!sea && path.size()<3))throw new IllegalArgumentException("未勘通连续道路或航道，请检查路基、桥亭及泊位");
+        var r=new Route(name,world.getUID().toString(),start.x(),start.y(),start.z(),end.x(),end.y(),end.z(),
+                seal(source),seal(dest),sea,path);
+        if(sea)assignBoat(r,first);
+        staff(r,r.sourceSeal());world.save(true);return r;
+    }
+
+    private void assignBoat(Route r,Point berth){
+        var data=home(r).getPersistentDataContainer();var key=field(r,"boat");
+        if(data.has(key)){vessel(r);return;}
+        var boats=world.getNearbyEntitiesByType(Boat.class,berth.feet(world),1.8).stream()
+                .filter(b->b.getPassengers().isEmpty() && !b.getPersistentDataContainer().has(consignment)).toList();
+        if(boats.size()!=1)throw new IllegalArgumentException("起点泊位须停有一艘空闲实体船");
+        Boat boat=boats.getFirst();
+        boat.getPersistentDataContainer().set(consignment,PersistentDataType.STRING,r.sourceSeal());
+        data.set(key,PersistentDataType.STRING,boat.getUniqueId().toString());
+    }
+    private Boat vessel(Route r){
+        String id=home(r).getPersistentDataContainer().get(field(r,"boat"),PersistentDataType.STRING);
+        if(id!=null && world.getEntity(UUID.fromString(id)) instanceof Boat boat && !boat.isDead())return boat;
+        throw new IllegalArgumentException("等候原登记船只及载货区块加载");
+    }
+    private Boat board(Route r,Team team){
+        Boat boat=vessel(r);
+        if(team.porter().getVehicle()==boat)return boat;
+        if(!boat.getPassengers().isEmpty() || boat.getLocation().distanceSquared(team.porter().getLocation())>16 ||
+                !boat.addPassenger(team.porter()))throw new IllegalArgumentException("船只和船工须在同一泊位");
+        return boat;
     }
 
     private String seal(Barrel barrel) {
@@ -85,6 +117,7 @@ final class FreightRoad {
 
     Goods manifest(Route r) {
         checkWorld(r);
+        inspect(r,0);inspect(r,r.length());
         var b = barrel(r.sx(), r.y(), r.sz(), r.sourceSeal());
         ItemStack stack = b.getSnapshotInventory().getItem(0);
         if (stack == null || !Set.of(Material.WHEAT, Material.WHITE_WOOL, Material.OAK_LOG).contains(stack.getType())
@@ -101,7 +134,7 @@ final class FreightRoad {
     boolean transfer(Trip t, boolean loading) {
         Route r = t.route();
         checkWorld(r);
-        Barrel b = loading ? barrel(r.sx(), r.y(), r.sz(), r.sourceSeal()) : barrel(r.dx(), r.y(), r.dz(), r.destSeal());
+        Barrel b = loading ? barrel(r.sx(), r.y(), r.sz(), r.sourceSeal()) : barrel(r.dx(), r.dy(), r.dz(), r.destSeal());
         String mark = (loading ? "load/" : "deliver/") + t.id();
         if (!mark.equals(b.getPersistentDataContainer().get(receipt, PersistentDataType.STRING))) {
             var inventory = b.getSnapshotInventory();
@@ -111,8 +144,9 @@ final class FreightRoad {
             if (!loading && slot != null && !slot.isEmpty()) throw new IllegalArgumentException("请清空终点桶第一格");
             Team team=team(r);
             Location dock=location(r,loading?0:r.length());
+            inspect(r,loading?0:r.length());
+            if(r.sea())board(r,team);
             if (!team.near(dock,4)){
-                team.move(dock,lane(r,dock));
                 throw new IllegalArgumentException("等候脚夫与驮畜到达装卸位");
             }
             if (loading){
@@ -131,17 +165,17 @@ final class FreightRoad {
     }
 
     private Location location(Route r, int step) {
-        return new Location(world, r.x(step) + 0.5, r.y() + 1.0, r.z(step) + 0.5);
+        return new Location(world, r.x(step) + 0.5, r.path().get(step).y() + 1.0, r.z(step) + 0.5);
     }
 
-    // At most two adjacent road cross-sections, covering up to four chunks.
+    // Include clearance around the traveller, including where the surveyed road turns at a chunk edge.
     void hold(Route r, int current, int next) {
         checkWorld(r);
         var needed = new HashSet<Cell>();
         for (int step : new int[]{current, next}) {
-            for (int offset = -1; offset <= 1; offset++) {
-                int x = r.x(step) + (r.sx() == r.dx() ? offset : 0);
-                int z = r.z(step) + (r.sz() == r.dz() ? offset : 0);
+            for (int ox=-1;ox<=1;ox++)for(int oz=-1;oz<=1;oz++){
+                int x=r.x(step)+ox;
+                int z=r.z(step)+oz;
                 if (!world.getWorldBorder().isInside(new Location(world, x + .5, r.y(), z + .5)))
                     throw new IllegalArgumentException("路段超出当前世界边界");
                 needed.add(new Cell(x >> 4, z >> 4));
@@ -162,34 +196,35 @@ final class FreightRoad {
         }
     }
 
-    void inspect(Route r, int step) {
-        for (int offset = -1; offset <= 1; offset++) {
-            int x = r.x(step) + (r.sx() == r.dx() ? offset : 0);
-            int z = r.z(step) + (r.sz() == r.dz() ? offset : 0);
-            Block deck = world.getBlockAt(x, r.y(), z);
-            if (!deck.getBlockData().isFaceSturdy(BlockFace.UP, BlockSupport.FULL))
-                throw new IllegalArgumentException("缺少连续路面 " + x + "," + r.y() + "," + z);
-            for (int h = 1; h <= 3; h++) if (!deck.getRelative(0, h, 0).getType().isAir())
-                throw new IllegalArgumentException("净空不足 " + x + "," + (r.y() + h) + "," + z);
-        }
+    void inspect(Route r,int step){
+        Point p=r.path().get(step);
+        if(!r.sea() && r.length()<2)throw new IllegalArgumentException("两站之间须有实际路段");
+        if(r.sea()){
+            if(!net.water(p) || step==0 && !net.port(r.start(),p) || step==r.length() && !net.port(r.end(),p))
+                throw new IllegalArgumentException("泊位或航道中断 "+p.x()+","+p.y()+","+p.z());
+        }else if(step==0 || step==r.length()){
+            barrel(p.x(),p.y(),p.z(),step==0?r.sourceSeal():r.destSeal());
+            if(!net.block(p).getRelative(0,1,0).isPassable() || !net.block(p).getRelative(0,2,0).isPassable())
+                throw new IllegalArgumentException("货站装卸位被堵塞");
+        }else if(!net.road(p))throw new IllegalArgumentException("道路或桥亭中断 "+p.x()+","+p.y()+","+p.z());
     }
-
-    private String crewId(String seal){return "station/"+seal;}
+    private String crewId(Route r){return (r.sea()?"boat/":"station/")+r.sourceSeal();}
     private Chunk home(Route r){return world.getChunkAt(r.sx()>>4,r.sz()>>4);}
     private void staff(Route r,String seal){
-        crews.staff(home(r),crewId(seal),"货站",location(r,0));
+        crews.staff(home(r),crewId(r),r.sea()?"船工":"货站",r.sea()?r.start().feet(world):location(r,0));
     }
     Team team(Route r){
         staff(r,r.sourceSeal());
-        Team team=crews.team(home(r),crewId(r.sourceSeal()));
+        Team team=crews.team(home(r),crewId(r));
         if(team==null)throw new IllegalArgumentException("等待登记脚夫与驮畜所在区块加载");
         return team;
     }
     void equip(Player p,Route r,String kind){
+        if(r.sea() && kind.equalsIgnoreCase("mule"))throw new IllegalArgumentException("水运不使用驮骡");
         team(r);
-        crews.equip(p,barrel(r.sx(),r.y(),r.sz(),r.sourceSeal()).getBlock(),crewId(r.sourceSeal()),TransportCrew.Upgrade.parse(kind));
+        crews.equip(p,barrel(r.sx(),r.y(),r.sz(),r.sourceSeal()).getBlock(),crewId(r),TransportCrew.Upgrade.parse(kind));
     }
-    String capacity(Route r){return crews.status(home(r),crewId(r.sourceSeal()));}
+    String capacity(Route r){return crews.status(home(r),crewId(r));}
     private ItemStack cargo(Team team){
         return team.bags().getItem(team.mule()==null?0:2);
     }
@@ -206,12 +241,14 @@ final class FreightRoad {
         team.porter().getPersistentDataContainer().set(consignment,PersistentDataType.STRING,t.id());
         crews.active(team,true);
     }
-    private Location lane(Route r,Location goal){
-        return goal.clone().add(r.sx()==r.dx()?.60:0,0,r.sz()==r.dz()?.60:0);
-    }
     boolean walk(Route r,Team team,int step){
         Location goal=location(r,step);
-        Location packGoal=lane(r,goal);
+        if(r.sea()){
+            Boat boat=board(r,team);var here=boat.getLocation();var delta=goal.toVector().subtract(here.toVector()).setY(0);
+            if(delta.lengthSquared()<.12){boat.setVelocity(new org.bukkit.util.Vector());return true;}
+            boat.setVelocity(delta.normalize().multiply(.18));return false;
+        }
+        Location packGoal=goal;
         boolean animalReady=team.mule()==null || team.mule().getLocation().distanceSquared(packGoal)<2.25;
         if(team.porter().getLocation().distanceSquared(goal)<.48 && animalReady){team.halt();return true;}
         team.onRoad(goal,packGoal);return false;
@@ -222,7 +259,7 @@ final class FreightRoad {
         if(t.id().equals(data.get(field(r,"bill"),PersistentDataType.STRING)))return true;
         // Older versions kept cargo in the freight manifest. The worker must collect it at the saved road position.
         if(t.phase()==Phase.UNLOADING){
-            var dest=barrel(r.dx(),r.y(),r.dz(),r.destSeal());
+            var dest=barrel(r.dx(),r.dy(),r.dz(),r.destSeal());
             if(("deliver/"+t.id()).equals(dest.getPersistentDataContainer().get(receipt,PersistentDataType.STRING)))return true;
         }
         int step=Math.min(t.step(),data.getOrDefault(field(r,"approach"),PersistentDataType.INTEGER,0));

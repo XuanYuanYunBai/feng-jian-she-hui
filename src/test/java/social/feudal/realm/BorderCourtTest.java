@@ -7,6 +7,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BorderCourtTest {
     @TempDir Path dir;
+    @Test void ownerChoosesCurrencyWithoutRepricingExistingReceipts()throws Exception{
+        try(var s=new RealmStore(dir.resolve("prices"))){
+            s.initialize("w",0,0,"摄政");var c=new BorderCourt(s);
+            c.bridge("东境伯家","ford","东桥","march",1024,70,0,3);
+            s.update("INSERT INTO passage(bridge,owner,payer,paid,at) VALUES('ford','march','客商',3,10)");
+            assertThrows(IllegalArgumentException.class,()->c.price("主教座堂","ford",TollCoin.SILVER,4));
+            c.price("东境伯家","ford",TollCoin.SILVER,4);
+            assertEquals("GOLD",s.value("SELECT currency FROM passage"));assertEquals(3,s.number("SELECT paid FROM passage"));
+            assertEquals("SILVER",s.value("SELECT currency FROM crossing"));assertEquals(4,s.number("SELECT fee FROM crossing"));
+            c.price("东境伯家","ford",TollCoin.GOLD,0);assertEquals(0,s.number("SELECT fee FROM crossing"));
+        }
+    }
     @Test void noticesContestedSecondsCounterclaimsAndRecordedTollsAreDistinct()throws Exception{
         try(var s=new RealmStore(dir.resolve("court"))){
             s.initialize("w",0,0,"npc-皇廷署理");var c=new BorderCourt(s);

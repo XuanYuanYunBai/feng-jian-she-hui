@@ -26,15 +26,31 @@ final class BorderCourt {
         if(s.number("SELECT count(*) FROM pragma_table_info('feud') WHERE name='slot'")==0)s.update("ALTER TABLE feud ADD COLUMN slot INTEGER NOT NULL DEFAULT 0");
         if(s.number("SELECT count(*) FROM pragma_table_info('feud') WHERE name='opened'")==0)s.update("ALTER TABLE feud ADD COLUMN opened INTEGER NOT NULL DEFAULT 0");
         s.update("CREATE TABLE IF NOT EXISTS passage(id INTEGER PRIMARY KEY,bridge TEXT,owner TEXT,payer TEXT,paid INTEGER,at INTEGER)");
+        if(s.number("SELECT count(*) FROM pragma_table_info('crossing') WHERE name='currency'")==0)
+            s.update("ALTER TABLE crossing ADD COLUMN currency TEXT NOT NULL DEFAULT 'GOLD'");
+        if(s.number("SELECT count(*) FROM pragma_table_info('crossing') WHERE name='nx'")==0)
+            s.update("ALTER TABLE crossing ADD COLUMN nx INTEGER NOT NULL DEFAULT 1");
+        if(s.number("SELECT count(*) FROM pragma_table_info('crossing') WHERE name='nz'")==0)
+            s.update("ALTER TABLE crossing ADD COLUMN nz INTEGER NOT NULL DEFAULT 0");
+        if(s.number("SELECT count(*) FROM pragma_table_info('passage') WHERE name='currency'")==0)
+            s.update("ALTER TABLE passage ADD COLUMN currency TEXT NOT NULL DEFAULT 'GOLD'");
+        if(s.number("SELECT count(*) FROM pragma_table_info('passage') WHERE name='bill'")==0)
+            s.update("ALTER TABLE passage ADD COLUMN bill TEXT");
+        s.update("CREATE UNIQUE INDEX IF NOT EXISTS toll_bill ON passage(bridge,bill) WHERE bill IS NOT NULL");
         privileges = new BridgePrivileges(s);
     }
     void bridge(String actor,String id,String name,String nation,int x,int y,int z,int fee)throws SQLException{
         Politics.id(id);Politics.wording(name,30);s.politics.represents(nation,actor);
         String title=s.owner(x>>4,z>>4);
         require(title!=null && nation.equals(s.politics.nation(title)),"桥亭须在本国辖区内");
-        require(fee>0 && fee<=8,"桥费首测每次 1–8 金粒");
+        require(fee>=0 && fee<=64,"每次费额须为 0–64 枚");
         require(s.value("SELECT id FROM crossing WHERE id=? OR (x=? AND y=? AND z=?)",id,x,y,z)==null,"桥亭或代号已登记");
-        s.update("INSERT INTO crossing VALUES(?,?,?,?,?,?,?)",id,name,nation,x,y,z,fee);
+        s.update("INSERT INTO crossing(id,name,owner,x,y,z,fee) VALUES(?,?,?,?,?,?,?)",id,name,nation,x,y,z,fee);
+    }
+    void price(String actor,String bridge,TollCoin coin,int fee)throws SQLException{
+        String owner=s.value("SELECT owner FROM crossing WHERE id=?",bridge);require(owner!=null,"未知收费亭");
+        s.politics.represents(owner,actor);require(fee>=0 && fee<=64,"每次费额须为 0–64 枚");
+        s.update("UPDATE crossing SET currency=?,fee=? WHERE id=?",coin.name(),fee,bridge);
     }
     int declare(String actor,String attacker,String bridge,String reason,long start,long now)throws SQLException{
         return s.atomic(()->{

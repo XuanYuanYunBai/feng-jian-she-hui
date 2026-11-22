@@ -77,6 +77,10 @@ public final class TransportCrew implements Listener {
     private NamespacedKey key(String name){return new NamespacedKey(plugin,name);}
     private NamespacedKey field(String id,String field){return key("crew/"+id+"/"+field);}
     private static void require(boolean b,String reason){if(!b)throw new IllegalArgumentException(reason);}
+    public boolean isCarrier(Mannequin body){
+        String id=body.getPersistentDataContainer().get(worker,PersistentDataType.STRING);
+        return id!=null && (id.startsWith("tax/") || id.startsWith("station/") || id.startsWith("boat/"));
+    }
     public boolean busy(Team team){return team.porter().getPersistentDataContainer().has(busy);}
     public void active(Team team,boolean value){
         if(value)team.porter.getPersistentDataContainer().set(busy,PersistentDataType.BYTE,(byte)1);

@@ -19,22 +19,45 @@ import static social.feudal.ui.Menus.*;
 /** Public hearings and staffed, passable crossing objectives share the same territorial register. */
 final class CrossingOffice implements Listener {
     private final RealmService realm;
+    private final CarrierTolls carriers;
     final BorderCourt court;
+    private final Map<String,social.feudal.transport.HaulNetwork.Gate> gates=new HashMap<>();
+    private final Map<String,Set<String>> waiting=new HashMap<>();
     final RealmStore s;
     CrossingOffice(RealmService realm)throws SQLException{
-        this.realm=realm;s=realm.store;court=new BorderCourt(s);
+        this.realm=realm;s=realm.store;court=new BorderCourt(s);carriers=new CarrierTolls(realm);
+        try(var q=s.sql("SELECT id,x,y,z,nx,nz FROM crossing");var rs=q.executeQuery()){
+            while(rs.next())remember(new social.feudal.transport.HaulNetwork.Gate(rs.getString(1),
+                    new social.feudal.transport.HaulNetwork.Point(rs.getInt(2),rs.getInt(3),rs.getInt(4)),rs.getInt(5),rs.getInt(6)));
+        }
         Bukkit.getPluginManager().registerEvents(this,realm.plugin);
         Bukkit.getScheduler().runTaskTimer(realm.plugin,this::tick,20,20);
     }
-    private static boolean open(Block post){
-        if(post.getType()!=Material.LECTERN || post.getRelative(BlockFace.WEST).getType()!=Material.BARREL)return false;
-        // Inspect the local deck and both approaches. The signing desk sits immediately west of the centre lane.
-        for(int dx=1;dx<=3;dx++)for(int dz=-3;dz<=3;dz++){
-            var feet=post.getRelative(dx,0,dz);
-            if(!feet.isPassable() || !feet.getRelative(BlockFace.UP).isPassable() || !feet.getRelative(0,2,0).isPassable()
-                    || !feet.getRelative(BlockFace.DOWN).getType().isSolid())return false;
+    private void remember(social.feudal.transport.HaulNetwork.Gate gate){
+        gates.put(gate.id(),gate);realm.roads.remember(gate);
+    }
+    private boolean open(Block b){
+        var p=social.feudal.transport.HaulNetwork.Point.of(b);
+        for(var g:gates.values())if(g.post().equals(p))return realm.roads.open(g);
+        return false;
+    }
+    private Barrel till(String id,Block post){
+        var g=gates.get(id);return (Barrel)post.getRelative(-g.nx(),0,-g.nz()).getState();
+    }
+    void clearance(social.feudal.transport.HaulNetwork.Point p,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
+        var gate=realm.roads.gate(p);if(gate==null)return;
+        String id=gate.id();
+        boolean paid=s.number("SELECT count(*) FROM passage WHERE bridge=? AND bill=?",id,bill)>0;
+        if(!paid){
+            boolean reserved=s.value("SELECT id FROM carrier_toll WHERE bridge=? AND bill=?",id,bill)!=null;
+            if(!reserved && s.number("SELECT fee FROM crossing WHERE id=?",id)==0)paid=true;
+            else paid=carriers.settle(id,bill,team,till(id,post(id)));
         }
-        return true;
+        if(paid){
+            var entries=waiting.get(id);if(entries!=null)entries.remove(bill);return;
+        }
+        waiting.computeIfAbsent(id,unused->new LinkedHashSet<>()).add(bill);
+        throw new IllegalArgumentException("运输队在 "+id+" 等候付费，请在亭内选择运单 "+bill);
     }
     void tick(){
         if(Bukkit.getOnlinePlayers().isEmpty())return;
@@ -84,14 +107,21 @@ final class CrossingOffice implements Listener {
     private void archive(Player p,String id)throws SQLException{
         var owner=s.value("SELECT owner FROM crossing WHERE id=?",id);require(owner!=null,"桥亭未登记");
         var body=new ArrayList<io.papermc.paper.registry.data.dialog.body.DialogBody>();
-        body.add(text("收费权　"+s.title(owner).name()+"　｜　每次 "+s.number("SELECT fee FROM crossing WHERE id=?",id)+" 金粒"));
-        body.add(text("在亭西的木桶首格放入本次路费，现场核账。过往收据按当时权利人留档。"));
+        body.add(text("收费权　"+s.title(owner).name()+"　｜　每次 "+s.number("SELECT fee FROM crossing WHERE id=?",id)+" "+coin(id).label));
+        body.add(text("在柜桶首格放入本次路费，现场核账。过往收据按当时权利人留档。"));
         var buttons=new ArrayList<io.papermc.paper.registry.data.dialog.ActionButton>();
         buttons.add(command("确认本次路费","realm toll "+id));
+        buttons.add(command("一金兑十二银","realm exchange "+id+" 银"));
+        buttons.add(command("十二银兑一金","realm exchange "+id+" 金"));
+        for(String bill:waiting.getOrDefault(id,Set.of()))
+            buttons.add(command("代付运单 "+bill,"realm paybill "+id+" "+bill));
         String actor=p.getUniqueId().toString();
         var title=s.title(owner);
         if(actor.equals(title.lawful()) && actor.equals(title.seal()))
-            buttons.add(command("颁发定次免税特许","realm tollform "+id));
+            {
+                buttons.add(command("颁发定次免税特许","realm tollform "+id));
+                buttons.add(command("调整币种及费率","realm rateform "+id));
+            }
         try(var query=s.sql("""
                 SELECT g.id,t.name,t.lawful,t.seal,g.remaining FROM bridge_privilege g
                 JOIN title t ON t.id=g.holder WHERE g.bridge=? AND g.remaining>0 ORDER BY g.id""",id);
@@ -111,34 +141,43 @@ final class CrossingOffice implements Listener {
         require(p.getLocation().distanceSquared(block.getLocation())<=36 && open(block),"请到可通行的桥亭六格内");
         return block;
     }
-    private void pay(Player p,String id)throws SQLException{
+    private TollCoin coin(String id)throws SQLException{return TollCoin.parse(s.value("SELECT currency FROM crossing WHERE id=?",id));}
+    private void pay(Player p,String id,String bill)throws SQLException{
         var block=counter(p,id);
         String owner=s.value("SELECT owner FROM crossing WHERE id=?",id),actor=p.getUniqueId().toString();
         int fee=s.number("SELECT fee FROM crossing WHERE id=?",id);long now=Instant.now().getEpochSecond();
-        var barrel=(Barrel)block.getRelative(BlockFace.WEST).getState();
+        var barrel=till(id,block);
         var receipt=new NamespacedKey(realm.plugin,"toll_receipt");recover(id,barrel,receipt);
-        court.privileges.checkPassage(id,actor,now);
-        var inv=barrel.getSnapshotInventory();var item=inv.getItem(0);var coin=new ItemStack(Material.GOLD_NUGGET);
-        require(item!=null && item.isSimilar(coin) && item.getAmount()>=fee,"请将实物金粒放入西侧柜桶首格");
+        if(bill==null)court.privileges.checkPassage(id,actor,now);
+        else require(s.value("SELECT id FROM carrier_toll WHERE bridge=? AND bill=?",id,bill)==null && waiting.getOrDefault(id,Set.of()).contains(bill) && s.value("SELECT id FROM passage WHERE bridge=? AND bill=?",id,bill)==null,"运单已缴或未在此等候");
+        var currency=coin(id);
+        if(fee==0){
+            s.update("INSERT INTO passage(bridge,owner,payer,paid,at,currency,bill) VALUES(?,?,?,0,?,?,?)",id,owner,actor,now,currency.name(),bill);
+            p.sendMessage("本次免费通行");return;
+        }
+        var inv=barrel.getSnapshotInventory();var item=inv.getItem(0);var coin=currency.stack(1);
+        require(item!=null && item.isSimilar(coin) && item.getAmount()>=fee,"请把 "+fee+" 枚"+currency.label+"放入柜桶首格");
         int destination=-1;
         for(int k=1;k<inv.getSize();k++){
             var pile=inv.getItem(k);if(pile==null || pile.isSimilar(coin) && pile.getAmount()+fee<=64){destination=k;break;}
         }
         require(destination>=0,"收费柜已满");var pile=inv.getItem(destination);
-        inv.setItem(destination,new ItemStack(Material.GOLD_NUGGET,fee+(pile==null?0:pile.getAmount())));
-        inv.setItem(0,item.getAmount()==fee?null:new ItemStack(Material.GOLD_NUGGET,item.getAmount()-fee));
+        inv.setItem(destination,currency.stack(fee+(pile==null?0:pile.getAmount())));
+        inv.setItem(0,item.getAmount()==fee?null:currency.stack(item.getAmount()-fee));
         // The physical movement and its retry record are saved together in the same barrel.
-        barrel.getPersistentDataContainer().set(receipt,PersistentDataType.STRING,owner+" "+actor+" "+fee+" "+now);
+        barrel.getPersistentDataContainer().set(receipt,PersistentDataType.STRING,owner+" "+actor+" "+fee+" "+now+" "+currency.name()+(bill==null?"":" "+bill));
         require(barrel.update(),"柜桶已改建");realm.world.save(true);
-        recover(id,(Barrel)block.getRelative(BlockFace.WEST).getState(),receipt);
-        p.sendMessage(s.title(owner).name()+" 的桥亭实收 "+fee+" 金粒");
+        recover(id,till(id,block),receipt);
+        p.sendMessage(s.title(owner).name()+" 的桥亭实收 "+fee+" "+currency.label);
     }
     private void recover(String id,Barrel bin,NamespacedKey key)throws SQLException{
         String saved=bin.getPersistentDataContainer().get(key,PersistentDataType.STRING);
         if(saved==null)return;String[] row=saved.split(" ");
+        String bill=row.length>5?row[5]:null;
         s.update("""
-            INSERT INTO passage(bridge,owner,payer,paid,at) SELECT ?,?,?,?,? WHERE NOT EXISTS
-            (SELECT 1 FROM passage WHERE bridge=? AND payer=? AND at=?)""",id,row[0],row[1],Integer.parseInt(row[2]),Long.parseLong(row[3]),id,row[1],Long.parseLong(row[3]));
+            INSERT OR IGNORE INTO passage(bridge,owner,payer,paid,at,currency,bill) SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS
+            (SELECT 1 FROM passage WHERE bridge=? AND payer=? AND at=? AND bill IS ?)""",id,row[0],row[1],Integer.parseInt(row[2]),
+            Long.parseLong(row[3]),row.length>4?row[4]:"GOLD",bill,id,row[1],Long.parseLong(row[3]),bill);
     }
     private void conflict(Player p,int n)throws SQLException{
         var body=new ArrayList<io.papermc.paper.registry.data.dialog.body.DialogBody>();
@@ -161,10 +200,23 @@ final class CrossingOffice implements Listener {
         switch(a[0]){
             case "crossing" -> {usage(a.length==2,"crossing 桥亭");archive(p,a[1]);}
             case "bridge" -> {
-                usage(a.length==5,"bridge 桥亭ID 桥名 国家 每次金粒");var b=p.getTargetBlockExact(6);
-                require(b!=null && open(b),"请瞄准讲台，西侧设收费桶，东侧留三格宽七格长的通道");
-                court.bridge(actor,a[1],a[2],a[3],b.getX(),b.getY(),b.getZ(),Integer.parseInt(a[4]));realm.changed();archive(p,a[1]);
+                usage(a.length==5 || a.length==6,"bridge 亭号 名称 国家 [金|银] 金额");
+                var b=p.getTargetBlockExact(6);require(b!=null,"请瞄准路边讲台");
+                var g=realm.roads.surveyGate(a[1],b);var currency=a.length==6?TollCoin.parse(a[4]):TollCoin.GOLD;
+                s.atomic(()->{
+                    court.bridge(actor,a[1],a[2],a[3],b.getX(),b.getY(),b.getZ(),Integer.parseInt(a[a.length-1]));
+                    s.update("UPDATE crossing SET nx=?,nz=?,currency=? WHERE id=?",g.nx(),g.nz(),currency.name(),a[1]);return null;
+                });remember(g);realm.changed();archive(p,a[1]);
             }
+            case "purse" -> {usage(a.length==1,"purse");carriers.fund(p);}
+            case "exchange" -> {usage(a.length==3,"exchange 亭号 金|银");counter(p,a[1]);TollCoin.exchange(p,TollCoin.parse(a[2]));}
+            case "rateform" -> {
+                usage(a.length==2,"rateform 亭号");counter(p,a[1]);s.politics.represents(s.value("SELECT owner FROM crossing WHERE id=?",a[1]),actor);
+                DiplomacyDesk.form(p,"调整通行费","新费率从下一笔缴费生效。零为免费通行。","realm rate "+a[1],List.of(
+                    new DiplomacyDesk.Field("coin","币种（金或银）",coin(a[1]).label,4),new DiplomacyDesk.Field("fee","每次金额",""+s.number("SELECT fee FROM crossing WHERE id=?",a[1]),2)));
+            }
+            case "rate" -> {usage(a.length==4,"rate 亭号 金|银 金额");counter(p,a[1]);court.price(actor,a[1],TollCoin.parse(a[2]),Integer.parseInt(a[3]));realm.changed();archive(p,a[1]);}
+            case "paybill" -> {usage(a.length==3,"paybill 亭号 运单");pay(p,a[1],a[2]);archive(p,a[1]);}
             case "tollform" -> {
                 usage(a.length==2 || a.length==3,"tollform 桥亭 [受许国]");counter(p,a[1]);
                 String owner=s.value("SELECT owner FROM crossing WHERE id=?",a[1]);
@@ -183,12 +235,12 @@ final class CrossingOffice implements Listener {
             }
             case "passage" -> {
                 usage(a.length==3,"passage 桥亭 特许号");var block=counter(p,a[1]);
-                var bin=(Barrel)block.getRelative(BlockFace.WEST).getState();
+                var bin=till(a[1],block);
                 recover(a[1],bin,new NamespacedKey(realm.plugin,"toll_receipt"));
                 int left=court.privileges.redeem(actor,a[1],Integer.parseInt(a[2]),Instant.now().getEpochSecond());
                 realm.changed();p.sendMessage("已登记免税通行，特许余 "+left+" 次");archive(p,a[1]);
             }
-            case "toll" -> {usage(a.length==2,"toll 桥亭");pay(p,a[1]);}
+            case "toll" -> {usage(a.length==2,"toll 桥亭");pay(p,a[1],null);}
             case "notice" -> {
                 usage(a.length>=5,"notice 原告国 桥亭 UTC开场时间（如2026-12-01T20:00:00Z） 理由");
                 long start;try{start=Instant.parse(a[3]).getEpochSecond();}catch(DateTimeException e){throw new IllegalArgumentException("请填写有效 UTC 时间");}

@@ -60,10 +60,18 @@ final class BlueAtlas implements Runnable {
                             .fillColor(new Color(0xe9ab38,.24f)).build());
                 }
             }
+            var network=new MarkerSet("驿道与航线",true,false);
+            for(var entry:realm.publicRoutes.entrySet()){
+                var route=entry.getValue();
+                var points=route.path().stream().map(p->new com.flowpowered.math.vector.Vector3d(p.x()+.5,p.y()+1.15,p.z()+.5)).toList();
+                network.put(entry.getKey(),LineMarker.builder().label((route.sea()?"航线 · ":"驿道 · ")+escape(entry.getKey()))
+                        .line(new Line(points)).centerPosition().depthTestEnabled(false).lineWidth(4)
+                        .lineColor(new Color(route.sea()?0x46cdef:0xe99844,.95f)).build());
+            }
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
                 sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
-                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);
+                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);
             }
             previous=api;published=realm.mapRevision;
         }catch(SQLException e){realm.plugin.getLogger().log(Level.WARNING,"重建公共疆域图层失败",e);}
@@ -78,14 +86,14 @@ final class BlueAtlas implements Runnable {
                     .add(escape(r.getString(2))+"　余 "+r.getInt(3)+" 次");
         }
         try(var q=s.sql("""
-                SELECT c.id,c.name,t.name,c.fee,c.x,c.y,c.z FROM crossing c JOIN title t ON t.id=c.owner""");
+                SELECT c.id,c.name,t.name,c.fee,c.x,c.y,c.z,c.currency FROM crossing c JOIN title t ON t.id=c.owner""");
                 var r=q.executeQuery()){
             while(r.next()){
                 String id=r.getString(1),name=escape(r.getString(2));
                 var lines=new ArrayList<String>();
                 lines.add("<strong>"+name+"</strong>");
                 lines.add("收费权　"+escape(r.getString(3)));
-                lines.add("每次 "+r.getInt(4)+" 金粒");
+                lines.add("每次 "+r.getInt(4)+" "+TollCoin.parse(r.getString(8)).label);
                 var grants=privileges.getOrDefault(id,List.of());
                 lines.add(grants.isEmpty()?"当前无免税特许":"免税特许");
                 lines.addAll(grants);

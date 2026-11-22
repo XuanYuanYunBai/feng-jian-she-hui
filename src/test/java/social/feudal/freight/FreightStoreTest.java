@@ -22,6 +22,32 @@ class FreightStoreTest {
         assertThrows(IllegalArgumentException.class, () -> new Route("d", "w", 0, 70, 0, 0, 0, "x", "y"));
     }
 
+    @Test void surveyedBendsAndHeightsSurviveReloadAndResume()throws Exception{
+        var path=java.util.List.of(new social.feudal.transport.HaulNetwork.Point(1,68,3),
+                new social.feudal.transport.HaulNetwork.Point(1,69,4),new social.feudal.transport.HaulNetwork.Point(2,69,4));
+        var r=new Route("pass","world",1,68,3,2,69,4,"depot","quay",false,path);
+        var file=temp.resolve("bend.sqlite");
+        try(var store=new FreightStore(file)){
+            store.register(r);store.book("bill",r,"a","b",stack,"WHEAT",1);store.loaded(store.active());store.move(store.active());
+        }
+        try(var store=new FreightStore(file)){
+            var trip=store.active();assertEquals(1,trip.step());assertEquals(r,trip.route());
+            assertEquals(69,trip.route().path().get(trip.step()).y());assertEquals(69,trip.route().dy());
+        }
+        assertThrows(IllegalArgumentException.class,()->new Route("air","world",1,68,3,2,69,4,"s","d",false,
+                java.util.List.of(path.getFirst(),path.getLast())));
+    }
+    @Test void preSurveyLedgerKeepsOriginalCheckpoints()throws Exception{
+        var file=temp.resolve("legacy.sqlite");
+        try(var db=java.sql.DriverManager.getConnection("jdbc:sqlite:"+file);var q=db.createStatement()){
+            q.execute("CREATE TABLE routes(name TEXT PRIMARY KEY,world TEXT,sx INT,y INT,sz INT,dx INT,dz INT,source_seal TEXT,dest_seal TEXT)");
+            q.execute("INSERT INTO routes VALUES('legacy','w',1,68,3,1,6,'s','d')");
+        }
+        try(var store=new FreightStore(file)){
+            var r=store.route("legacy");assertEquals(3,r.length());assertEquals(5,r.path().get(2).z());assertEquals(68,r.dy());
+            assertFalse(r.sea());
+        }
+    }
     @Test void changedSourceReleasesOnlyUnloadedCartAndKeepsOriginalBillNumber() throws Exception {
         try (var db = new FreightStore(temp.resolve("freight.sqlite"))) {
             db.register(road);

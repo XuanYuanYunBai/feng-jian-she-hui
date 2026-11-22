@@ -24,6 +24,11 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final ManorOffice manors;
     final MillOffice mills;
     final CrossingOffice crossings;
+    public final social.feudal.transport.HaulNetwork roads;
+    public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
+        crossings.clearance(point,bill,team);
+    }
+
     final MarketOffice markets;
     final Council council;
     final CharterOffice charters;
@@ -33,10 +38,15 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final social.feudal.transport.TransportCrew crews;
     private MapView view;
     private PoliticalMap renderer;
+    record PublicRoute(boolean sea, List<social.feudal.transport.HaulNetwork.Point> path){}
+    final Map<String,PublicRoute> publicRoutes=new LinkedHashMap<>();
+    public void recordRoute(String id,boolean sea,List<social.feudal.transport.HaulNetwork.Point> path){
+        publicRoutes.put(id,new PublicRoute(sea,path));changed();
+    }
     int mapRevision;
 
     public RealmService(JavaPlugin plugin,World world,Path path,social.feudal.transport.TransportCrew crews) throws SQLException {
-        this.crews=crews;this.plugin=plugin;this.world=world;store=new RealmStore(path);
+        roads=new social.feudal.transport.HaulNetwork(world);this.crews=crews;this.plugin=plugin;this.world=world;store=new RealmStore(path);
         store.checkWorld(world.getUID().toString());
         contributions=new Contributions(store,path.resolveSibling("freight.sqlite"));
         dialogs=new RealmDialogs(this);diplomacy=new DiplomacyDesk(this);
@@ -102,7 +112,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
                 case "stall","market","bidform","bid","sell" -> markets.run(player(s),a);
-                case "bridge","crossing","toll","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
+                case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
                 case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);

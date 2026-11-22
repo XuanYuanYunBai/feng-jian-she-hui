@@ -57,7 +57,7 @@ public final class SurveyPlugin extends JavaPlugin {
             new social.feudal.npc.NpcSkins(this);
             var crews = new social.feudal.transport.TransportCrew(this);
             realm = new RealmService(this, world, getDataFolder().toPath().resolve("realm.sqlite"), crews);
-            freight = new FreightService(this, world, getDataFolder().toPath().resolve("freight.sqlite"), crews);
+            freight = new FreightService(this, world, getDataFolder().toPath().resolve("freight.sqlite"), crews,realm);
             getServer().getScheduler().runTaskTimer(this, this::tick, 1L, ticks);
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "勘测初始化失败", e);
