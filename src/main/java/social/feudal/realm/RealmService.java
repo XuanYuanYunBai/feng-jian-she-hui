@@ -105,7 +105,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 case "bridge","crossing","toll","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
                 case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
-                case "diplomacy","org","document","debate","compose","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
+                case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
                 case "equip" -> {usage(a.length==3,"equip 税仓ID speed|pack|mule");taxes.couriers.equip(player(s),taxes.ledger.depot(a[1]),a[2]);}

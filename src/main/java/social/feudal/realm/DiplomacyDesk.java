@@ -31,9 +31,12 @@ final class DiplomacyDesk {
         var buttons=new ArrayList<ActionButton>();
         for(String id:column("SELECT id FROM association ORDER BY rowid"))
             buttons.add(command(s.value("SELECT name FROM association WHERE id=?",id),"realm org "+id));
-        for(String id:column("SELECT id FROM treaty WHERE kind='条约' OR state='待批准' ORDER BY rowid DESC"))
+        for(String id:column("SELECT id FROM treaty WHERE kind IN ('条约','割地条约') OR state='待批准' ORDER BY rowid DESC"))
             buttons.add(command("文书 · "+s.value("SELECT name FROM treaty WHERE id=?",id),"realm document "+id));
-        for(String id:countries(p))buttons.add(command(s.title(id).name()+" · 起草","realm compose "+id));
+        for(String id:countries(p)){
+            buttons.add(command(s.title(id).name()+" · 起草","realm compose "+id));
+            buttons.add(command(s.title(id).name()+" · 议让土地","realm cedeform "+id));
+        }
         buttons.add(command("查看国家疆界","realm map country"));buttons.add(command("查看帝国疆域","realm map empire"));
         buttons.add(command("返回纹章院","realm atlas"));
         show(p,"外交院 · 条约与国际组织",List.of(text("选取组织查阅章程、成员和议案。代表本国起草条约，经各方批准可以设立常设组织。")),List.of(),buttons,2);
@@ -77,10 +80,24 @@ final class DiplomacyDesk {
         var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();
         body.add(text(s.value("SELECT kind || '　｜　' || state || char(10) || terms FROM treaty WHERE id=?",id)));
         var my=countries(p);
+        var deed=law.cessions.get(id);
+        boolean pending="待批准".equals(s.value("SELECT state FROM treaty WHERE id=?",id));
+        if(deed!=null){
+            var b=deed.bounds();
+            body.add(text("让方　"+s.title(deed.donor()).name()+"　→　受方　"+s.title(deed.recipient()).name()));
+            body.add(text("地籍附件　西北 ("+b.west()+", "+b.north()+") 至东南 ("+b.east()+", "+b.south()+")　共 "+b.area()+" 个区块"));
+            if(pending){
+                body.add(text("双方持印人须在十二格内会签。受方落印时立即按附件交地。"));
+                if(my.contains(deed.donor()))buttons.add(command("撤回割地文书","realm cancelcede "+id+" "+deed.donor()));
+                if(my.contains(deed.recipient()))buttons.add(command("谢绝受地","realm cancelcede "+id+" "+deed.recipient()));
+            }
+        }
         for(var country:column("SELECT nation FROM signatory WHERE treaty=?",id)){
             String signer=s.value("SELECT signer FROM signatory WHERE treaty=? AND nation=?",id,country);
-            body.add(text(s.title(country).name()+"　"+(signer==null?"待批准":realm.display(signer)+" 已盖印")));
-            if(signer==null && my.contains(country))buttons.add(command("代表"+s.title(country).name()+"签署","realm sign "+id+" "+country));
+            String signature = signer == null ? "未签署" : realm.display(signer)+" 已盖印";
+            if(signer==null && pending)signature="待批准";
+            body.add(text(s.title(country).name()+"　"+signature));
+            if(pending && signer==null && my.contains(country))buttons.add(command("代表"+s.title(country).name()+"签署","realm sign "+id+" "+country));
         }
         for(String org:column("SELECT org FROM organisation_signature WHERE treaty=?",id)){
             String sign=s.value("SELECT signer FROM organisation_signature WHERE treaty=? AND org=?",id,org);
@@ -141,6 +158,32 @@ final class DiplomacyDesk {
             case "org" -> {usage(a.length==2,"org 组织");profile(p,a[1]);}
             case "document" -> {usage(a.length==2,"document 条约");document(p,a[1]);}
             case "debate" -> {usage(a.length==2,"debate 议案");debate(p,Integer.parseInt(a[1]));}
+            case "cedeform" -> {
+                usage(a.length==2 || a.length==3,"cedeform 让方 [受方]");law.represents(a[1],actor);
+                if(a.length==2){
+                    var buttons=new ArrayList<ActionButton>();
+                    for(var other:column("SELECT id FROM nation WHERE id<>? ORDER BY id",a[1]))
+                        buttons.add(command(s.title(other).name(),"realm cedeform "+a[1]+" "+other));
+                    buttons.add(command("返回外交院","realm diplomacy"));
+                    show(p,"为"+s.title(a[1]).name()+"选择受让国",List.of(text("选定受方后填写直辖区块的西北角与东南角。")),List.of(),buttons,2);
+                }else{
+                    var chunk=p.getLocation().getChunk();
+                    form(p,"起草割地条约","让方 "+s.title(a[1]).name()+"，受方 "+s.title(a[2]).name()+"。坐标以区块计，含两端。提交即由让方盖印，待会签前可撤回。",
+                            "realm cede "+a[1]+" "+a[2],List.of(new Field("id","文书代号","",24),
+                                    new Field("west","西界",""+chunk.getX(),9),new Field("north","北界",""+chunk.getZ(),9),
+                                    new Field("east","东界",""+chunk.getX(),9),new Field("south","南界",""+chunk.getZ(),9),
+                                    new Field("name","条约名称","",30)));
+                }
+            }
+            case "cede" -> {
+                usage(a.length>=9,"cede 让方 受方 文号 西 北 东 南 条约名称");
+                var b=new Charters.Bounds(Integer.parseInt(a[4]),Integer.parseInt(a[5]),Integer.parseInt(a[6]),Integer.parseInt(a[7]));
+                law.cessions.draft(a[3],a[1],a[2],actor,b,String.join(" ",Arrays.copyOfRange(a,8,a.length)));
+                document(p,a[3]);
+            }
+            case "cancelcede" -> {
+                usage(a.length==3,"cancelcede 文号 本国");law.cessions.cancel(a[1],a[2],actor);document(p,a[1]);
+            }
             case "compose" -> {usage(a.length==2,"compose 本国");law.represents(a[1],actor);
                 form(p,"起草多边文书","本国先签，最后一国批准时创始签署人须在场。国家代号可在各领档案查询。",
                         "realm treaty "+a[1],List.of(new Field("id","文书代号","",24),new Field("name","名称","",30),new Field("kind","条约、河运同盟或防御联盟","条约",8),new Field("members","缔约方（本国、他国或 @组织）",a[1]+",",180),new Field("terms","条款","",200)));
@@ -154,7 +197,7 @@ final class DiplomacyDesk {
                 document(p,a[2]);}
             case "sign" -> {usage(a.length==3,"sign 条约 本国");
                 present(p,a[1]);
-                law.sign(a[1],a[2],actor);document(p,a[1]);}
+                law.sign(a[1],a[2],actor);realm.changed();document(p,a[1]);}
             case "orgsign" -> {usage(a.length==3,"orgsign 条约 组织");present(p,a[1]);law.signOrganisation(a[1],a[2],actor);document(p,a[1]);}
             case "propose" -> {usage(a.length>=6,"propose 组织 本国 种类 所涉国家 条款");
                 debate(p,law.propose(a[1],a[2],actor,a[3],a[4],String.join(" ",Arrays.copyOfRange(a,5,a.length))));}

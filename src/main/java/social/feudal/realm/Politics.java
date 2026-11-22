@@ -8,6 +8,7 @@ import static social.feudal.realm.RealmStore.require;
 final class Politics {
     static final String EMPIRE="empire";
     final RealmStore s;
+    final LandCessions cessions;
     Politics(RealmStore s) throws SQLException {
         this.s=s;
         s.atomic(()->{
@@ -40,6 +41,7 @@ final class Politics {
             if(s.ready() && s.value("SELECT id FROM association WHERE id=?",EMPIRE)==null)bootstrap(true);
             return null;
         });
+        cessions = new LandCessions(this);
     }
     int period()throws SQLException{return Math.max(1,s.number("SELECT v FROM setting WHERE k='period'"));}
     void log(String org,String nation,String event)throws SQLException{
@@ -86,25 +88,29 @@ final class Politics {
     static void id(String id){require(id.matches("[a-z][a-z0-9_-]{0,23}"),"代号须为 1–24 位小写字母、数字、短横或下划线");}
     static void wording(String text,int max){require(!text.isBlank() && text.length()<=max,"名称或条款为空或过长");}
     void draft(String id,String name,String kind,String terms,List<String> countries,String proposer,String actor)throws SQLException{
+        require(Set.of("条约","河运同盟","防御联盟").contains(kind),"请选择条约、河运同盟或防御联盟");
         s.atomic(()->{
-            id(id);wording(name,30);wording(terms,200);
-            require(Set.of("条约","河运同盟","防御联盟").contains(kind),"请选择条约、河运同盟或防御联盟");
-            require(s.value("SELECT id FROM association WHERE id=? UNION SELECT id FROM treaty WHERE id=?",id,id)==null,"外交代号已存在");
-            require(countries.size()>=2 && countries.size()<=24 && new HashSet<>(countries).size()==countries.size()
-                    && countries.contains(proposer),"须列出 2–24 个不同国家及本国");
-            represents(proposer,actor);
-            s.update("INSERT INTO treaty(id,name,kind,terms) VALUES(?,?,?,?)",id,name,kind,terms);
-            for(String country:countries){
-                if(country.startsWith("@")){
-                    require(kind.equals("条约"),"首发常设组织由国家创设，国际组织可作为条约缔约方");
-                    String org=country.substring(1);active(org);
-                    s.update("INSERT INTO organisation_signature(treaty,org) VALUES(?,?)",id,org);continue;
-                }
-                require(s.value("SELECT id FROM nation WHERE id=?",country)!=null,"没有这个国家 "+country);
-                s.update("INSERT INTO signatory VALUES(?,?,?)",id,country,country.equals(proposer)?actor:null);
-            }
-            log(null,proposer,"提出 "+name+" · "+terms);return null;
+            registerTreaty(id,name,kind,terms,countries,proposer,actor);
+            return null;
         });
+    }
+    void registerTreaty(String id,String name,String kind,String terms,List<String> countries,String proposer,String actor)throws SQLException{
+        id(id);wording(name,30);wording(terms,200);
+        require(s.value("SELECT id FROM association WHERE id=? UNION SELECT id FROM treaty WHERE id=?",id,id)==null,"外交代号已存在");
+        require(countries.size()>=2 && countries.size()<=24 && new HashSet<>(countries).size()==countries.size()
+                && countries.contains(proposer),"须列出 2–24 个不同国家及本国");
+        represents(proposer,actor);
+        s.update("INSERT INTO treaty(id,name,kind,terms) VALUES(?,?,?,?)",id,name,kind,terms);
+        for(String country:countries){
+            if(country.startsWith("@")){
+                require(kind.equals("条约"),"首发常设组织由国家创设，国际组织可作为条约缔约方");
+                String org=country.substring(1);active(org);
+                s.update("INSERT INTO organisation_signature(treaty,org) VALUES(?,?)",id,org);continue;
+            }
+            require(s.value("SELECT id FROM nation WHERE id=?",country)!=null,"没有这个国家 "+country);
+            s.update("INSERT INTO signatory VALUES(?,?,?)",id,country,country.equals(proposer)?actor:null);
+        }
+        log(null,proposer,"提出 "+name+" · "+terms);
     }
     void sign(String id,String country,String actor)throws SQLException{
         s.atomic(()->{
@@ -120,7 +126,9 @@ final class Politics {
     private void finishTreaty(String id,String party)throws SQLException{
         if(unsigned(id)>0){log(null,party,"批准 "+id);return;}
         s.update("UPDATE treaty SET state='生效' WHERE id=?",id);
-        if(!"条约".equals(s.value("SELECT kind FROM treaty WHERE id=?",id))){
+        String kind=s.value("SELECT kind FROM treaty WHERE id=?",id);
+        if(LandCessions.KIND.equals(kind))cessions.convey(id);
+        else if(!"条约".equals(kind)){
             s.update("INSERT INTO association(id,name,kind,charter) SELECT id,name,kind,terms FROM treaty WHERE id=?",id);
             s.update("INSERT INTO member SELECT treaty,nation,1,0 FROM signatory WHERE treaty=?",id);
         }
