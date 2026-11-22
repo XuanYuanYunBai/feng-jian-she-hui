@@ -14,7 +14,7 @@ public final class HaulNetwork {
         public int distance(Point p){return Math.abs(x-p.x)+Math.abs(y-p.y)+Math.abs(z-p.z);}
     }
     public record Gate(String id,Point post,int nx,int nz){}
-    private static final int[][] DIR={{1,0},{-1,0},{0,1},{0,-1}};
+    static final int[][] DIR={{1,0},{-1,0},{0,1},{0,-1}};
     private final Map<Point,Gate> gates=new HashMap<>();
     private final World world;
     public HaulNetwork(World world){this.world=world;}
@@ -52,7 +52,32 @@ public final class HaulNetwork {
     }
     public boolean road(Point p){
         Gate g=gates.get(p);
-        return g==null ? bareDeck(p) && block(p).getRelative(BlockFace.DOWN).getType().isSolid() : open(g);
+        if(g!=null)return open(g);
+        if(!bareDeck(p))return false;
+        if(supported(p))return true;
+        return bridgeSpan(p);
+    }
+    private boolean supported(Point p){
+        return block(p).getRelative(BlockFace.DOWN).getType().isSolid();
+    }
+    // An unchartered bridge needs two continuous deck lanes between abutments or piers.
+    private boolean bridgeSpan(Point p){
+        for(int[] side:DIR){
+            var lane=p.offset(side[0],0,side[1]);
+            if(!bareDeck(lane))continue;
+            int dx=-side[1],dz=side[0];
+            int first=supportDistance(p,lane,dx,dz,16);
+            if(first>0 && supportDistance(p,lane,-dx,-dz,16-first)>0)return true;
+        }
+        return false;
+    }
+    private int supportDistance(Point a,Point b,int dx,int dz,int limit){
+        for(int step=1;step<=limit;step++){
+            a=a.offset(dx,0,dz);b=b.offset(dx,0,dz);
+            if(!bareDeck(a) || !bareDeck(b))break;
+            if(supported(a) && supported(b))return step;
+        }
+        return -1;
     }
     public boolean open(Gate g){
         if(!loaded(g.post))return false;

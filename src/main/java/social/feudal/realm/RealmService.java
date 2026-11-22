@@ -29,6 +29,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         crossings.clearance(point,bill,team);
     }
 
+    final social.feudal.transport.PlayerTravel travel;
     final MarketOffice markets;
     final Council council;
     final CharterOffice charters;
@@ -54,6 +55,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
+        travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
             Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);
@@ -90,8 +92,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         try {
             String action=a.length==0 && s instanceof Player && store.ready()?"atlas":a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
             if(a.length>0)a[0]=action;
+            if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
-                s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标");
+                s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
@@ -217,6 +220,6 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     }
     @Override public void close()throws SQLException{
         if(view!=null && renderer!=null)view.removeRenderer(renderer);
-        taxes.saveTime();store.close();
+        travel.close();taxes.saveTime();store.close();
     }
 }

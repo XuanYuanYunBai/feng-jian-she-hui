@@ -60,9 +60,18 @@ final class BlueAtlas implements Runnable {
                             .fillColor(new Color(0xe9ab38,.24f)).build());
                 }
             }
+            var ferries=new MarkerSet("公共航线泊位",true,false);
             var network=new MarkerSet("驿道与航线",true,false);
             for(var entry:realm.publicRoutes.entrySet()){
                 var route=entry.getValue();
+                if(route.sea() && !route.path().isEmpty()){
+                    for(var berth:List.of(route.path().getFirst(),route.path().getLast())){
+                        String key=berth.x()+"_"+berth.y()+"_"+berth.z();
+                        ferries.put(key,POIMarker.builder().label("渡口泊位")
+                                .detail("已勘测的公共航线泊位。请驾船靠近木栈桥的系缆桩上下船。")
+                                .position(berth.x()+.5,berth.y()+1,berth.z()+.5).defaultIcon().build());
+                    }
+                }
                 var points=route.path().stream().map(p->new com.flowpowered.math.vector.Vector3d(p.x()+.5,p.y()+1.15,p.z()+.5)).toList();
                 network.put(entry.getKey(),LineMarker.builder().label((route.sea()?"航线 · ":"驿道 · ")+escape(entry.getKey()))
                         .line(new Line(points)).centerPosition().depthTestEnabled(false).lineWidth(4)
@@ -71,7 +80,7 @@ final class BlueAtlas implements Runnable {
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
                 sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
-                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);
+                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-ferries",ferries);
             }
             previous=api;published=realm.mapRevision;
         }catch(SQLException e){realm.plugin.getLogger().log(Level.WARNING,"重建公共疆域图层失败",e);}

@@ -71,15 +71,24 @@ def check_routes(path, layers):
     markers = layers["feudal-network"]["markers"]
     if set(markers) != {row[0] for row in rows}:
         raise ValueError("公布的货线名册有差异")
+    berths = set()
     for name, sx, y, sz, dx, dz, saved in rows:
         if saved is None:
             delta_x, delta_z = (dx > sx) - (dx < sx), (dz > sz) - (dz < sz)
             cells = [(sx + step * delta_x, y, sz + step * delta_z) for step in range(abs(dx-sx) + abs(dz-sz) + 1)]
         else:
             cells = [tuple(map(int, node.split(","))) for node in saved.split("|")[2].split(";")]
+            if saved.split("|")[1] == "water":
+                berths.update([cells[0], cells[-1]])
         actual = [(v["x"], v["y"], v["z"]) for v in markers[name]["line"]]
         if actual != [(x + .5, y + 1.15, z + .5) for x, y, z in cells]:
             raise ValueError("地图路线与勘测的逐格坐标不符 " + name)
+    if "feudal-ferries" in layers:
+        actual_berths = {tuple(marker["position"][axis] for axis in "xyz")
+                         for marker in layers["feudal-ferries"]["markers"].values()}
+        if actual_berths != {(x + .5, y + 1, z + .5) for x, y, z in berths}:
+            raise ValueError("地图泊位与公共航线端点不符")
+        return f"，{len(rows)} 条实测货线，{len(berths)} 处已勘测泊位"
     return f"，{len(rows)} 条实测货线"
 
 
