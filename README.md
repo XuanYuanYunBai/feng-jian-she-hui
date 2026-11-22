@@ -2,9 +2,9 @@
 
 项目名称取自马克·布洛赫（Marc Bloch）的同名著作《封建社会》（La Société féodale）。这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[战略玩法设计与下一轮验收](docs/slg-design.md)
 
-当前可玩版本 **《封建社会》0.8.0** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，玩家使用 `/realm` 打开中文图册，使用 `/realm travel` 查看脚下路况和随身货量，使用 `/realm prices` 比较各地收购价。
+当前可玩版本 **《封建社会》0.9.0** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，玩家使用 `/realm` 打开中文图册，使用 `/realm travel` 查看脚下路况和随身货量，使用 `/realm prices` 比较各地玩家的买卖报价。
 
-[下载插件](examples/imperial-atlas/feudal-survey-0.8.0.jar) · [商站行情、金银交割与实测](docs/paper-0.8.0-markets.md) · [玩家货运、桥梁与渡口实测](docs/paper-0.7.0-player-travel.md) · [异高道路、港口与金银路费](docs/paper-0.6.0-network.md) · [桥亭特许、BlueMap 安装与实机截图](docs/paper-0.5.2-bluemap.md) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
+[下载插件](examples/imperial-atlas/feudal-survey-0.9.0.jar) · [玩家定价、水陆联运与分封验收](docs/paper-0.9.0-river-fair.md) · [商站行情、金银交割与实测](docs/paper-0.8.0-markets.md) · [玩家货运、桥梁与渡口实测](docs/paper-0.7.0-player-travel.md) · [异高道路、港口与金银路费](docs/paper-0.6.0-network.md) · [桥亭特许、BlueMap 安装与实机截图](docs/paper-0.5.2-bluemap.md) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
 
 项目人物使用 Minecraft 原版人形实体 `Mannequin`。首次加入服务器时，接受“封建社会”的资源包即可看到四套原创像素皮肤。税仓、公共货线及封臣驻地各有对应的衣着。右键驻地执事或教士可查当地领地与税权。[人物皮肤源图](assets/npc) · [资源包](examples/imperial-atlas/feudal-people-v1.zip)
 
@@ -47,7 +47,7 @@
 
 ## 构建与安装
 
-使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.8.0.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
+使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.9.0.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
 
 小规模复验可以在全新测试存档首次执行命令前，把初始半径和步长设为 1，最大半径设为 2，并重启服务器。将一项门槛设为 1000000000，可观察首轮四个区块、次轮十二个区块与预算停机。中途暂停并重启，检查状态及坐标保留。默认配置适用于较大规模的预生成实验。
 

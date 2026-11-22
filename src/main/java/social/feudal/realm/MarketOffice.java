@@ -31,6 +31,8 @@ final class MarketOffice implements Listener {
         this.realm=realm;s=realm.store;market=new NamespacedKey(realm.plugin,"market_stall");receipt=new NamespacedKey(realm.plugin,"trade_receipt");
         vendor=new NamespacedKey(realm.plugin,"offering_seller");buyer=new NamespacedKey(realm.plugin,"stall_owner");
         bids=new MarketBids(s);
+        Bukkit.getPluginManager().registerEvents(new NonPlayerTrade(),realm.plugin);
+        Bukkit.getPluginManager().registerEvents(new TollCoin.Crafting(),realm.plugin);
         Bukkit.getPluginManager().registerEvents(this,realm.plugin);
     }
     private Block location(String id)throws SQLException{
@@ -48,12 +50,58 @@ final class MarketOffice implements Listener {
     private void recover(Barrel bin)throws SQLException{
         var raw=bin.getPersistentDataContainer().get(receipt,PersistentDataType.STRING);if(raw==null)return;
         String[] parts=raw.split(" ");int id=Integer.parseInt(parts[1]);
+        int paid=parts.length==4?Integer.parseInt(parts[2]):s.number("SELECT price FROM bid WHERE id=?",id);
+        String customer=parts[parts.length-1];
         boolean changed=s.atomic(()->{
-            if(s.update("INSERT OR IGNORE INTO trade VALUES(?,?,?)",parts[0],id,parts[2])==0)return false;
+            if(s.update("INSERT INTO trade(id,bid,seller,paid) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING",parts[0],id,customer,paid)==0)return false;
             require(s.update("UPDATE bid SET remaining=remaining-1 WHERE id=? AND remaining>0",id)==1,"买单余额需要核对");
             return true;
         });
         if(changed)realm.changed();
+    }
+    private ItemStack goods(MarketBids.Offer o){return new ItemStack(GOODS.get(o.goods()),o.lot());}
+    private ItemStack ownerLot(MarketBids.Offer o){return o.ask()?goods(o):o.currency().stack(o.price());}
+    private static boolean enough(ItemStack actual,ItemStack required){
+        return actual!=null && actual.isSimilar(required) && actual.getAmount()>=required.getAmount();
+    }
+    private void settle(Player p,String[] a)throws SQLException{
+        usage(a.length==2 || a.length==3,a[0]+" 订单号 [确认金额]");
+        int id=Integer.parseInt(a[1]);
+        var initial=bids.offer(id);
+        var bin=at(p,initial.stall());
+        // Recovery may have recorded a previously committed exchange and changed the reference.
+        var o=bids.offer(id);String actor=p.getUniqueId().toString();
+        require(o.action().equals(a[0]),"请选择与订单方向相符的交易");
+        require(!actor.equals(s.value("SELECT owner FROM stall WHERE id=?",o.stall())),"本家不能与自己的订单成交");
+        require(o.remaining()>0,"本单已结");
+        if((o.floating() && a.length==2) || (a.length==3 && Integer.parseInt(a[2])!=o.price())){
+            p.sendMessage("请核对当前整批金额，再确认交割");run(p,new String[]{"quote",a[1]});return;
+        }
+        var inv=bin.getSnapshotInventory();
+        var visitor=o.ask()?o.currency().stack(o.price()):goods(o);var owner=ownerLot(o);
+        require(actor.equals(bin.getPersistentDataContainer().get(vendor,PersistentDataType.STRING)),"请本人把货物或付款放入第一格");
+        require(enough(inv.getItem(0),visitor),"第一格的货物或钱币不足，或品种不符");
+        require(enough(inv.getItem(1),owner),o.ask()?"柜中现货不足":"柜中实付"+o.currency().label+"不足，本批暂缓交割");
+        require(inv.getItem(2)==null,"请先取走上笔交割物");
+        int destination=-1;
+        for(int n=3;n<inv.getSize();n++){
+            var stack=inv.getItem(n);
+            if(stack==null || stack.isSimilar(visitor) && stack.getAmount()+visitor.getAmount()<=stack.getMaxStackSize()){
+                destination=n;break;
+            }
+        }
+        require(destination>=0,"业主收存格已满");
+        var stored=inv.getItem(destination);
+        inv.setItem(destination,visitor.asQuantity(visitor.getAmount()+(stored==null?0:stored.getAmount())));
+        deduct(inv,0,visitor.getAmount());deduct(inv,1,owner.getAmount());inv.setItem(2,owner);
+        bin.getPersistentDataContainer().set(receipt,PersistentDataType.STRING,UUID.randomUUID()+" "+id+" "+o.price()+" "+actor);
+        require(bin.update(),"柜桶已改变");realm.world.save(true);recover((Barrel)bin.getBlock().getState());
+        p.sendMessage("本批交割完成，请从第三格取走 "+(o.ask()?o.lot()+" 件"+o.goods():o.price()+" "+o.currency().label));
+        page(p,o.stall(),1);
+    }
+    private static void deduct(Inventory inv,int slot,int count){
+        var stack=Objects.requireNonNull(inv.getItem(slot));
+        inv.setItem(slot,stack.getAmount()==count?null:stack.asQuantity(stack.getAmount()-count));
     }
     void run(Player p,String[] a)throws SQLException{
         realm.inWorld(p);String actor=p.getUniqueId().toString();
@@ -74,63 +122,53 @@ final class MarketOffice implements Listener {
             case "prices" -> {
                 usage(a.length<=3,"prices [货种或全部] [页码]");
                 String goods=a.length>=2?a[1]:"全部";
-                require(goods.equals("全部") || GOODS.containsKey(goods),"请选择已登记的收购货种");
+                require(goods.equals("全部") || GOODS.containsKey(goods),"请选择已登记的货种");
                 board(p,goods,a.length==3?Integer.parseInt(a[2]):1);
             }
             case "quote" -> {
                 usage(a.length==2,"quote 收购单号");int id=Integer.parseInt(a[1]);
                 var offer=bids.offer(id);
                 var buttons=new ArrayList<ActionButton>();
-                if(offer.remaining()>0)buttons.add(command("在柜台交付一批","realm sell "+id));
+                if(offer.remaining()>0)buttons.add(command(offer.ask()?"在柜台买一批":"在柜台卖一批",offer.deal()));
                 buttons.add(command("商站其他报价","realm market "+offer.stall()));
                 buttons.add(command("比较同种货物","realm prices "+offer.goods()));
-                show(p,"收购单 #"+id,List.of(text(offer.name()+"　("+offer.x()+", "+offer.y()+", "+offer.z()+")"),
-                        text(offer.quote()+"\n"+funding(offer)),text("请本人将货物放入商柜第一格，交割后从第三格领走钱币。")),List.of(),buttons,2);
+                show(p,offer.kind()+"单 #"+id,List.of(text(offer.name()+"　("+offer.x()+", "+offer.y()+", "+offer.z()+")"),
+                        text(offer.quote()+"\n"+offer.terms()+"　"+funding(offer)),text("请本人将"+(offer.ask()?"钱币":"货物")+"放入商柜第一格，交割后从第三格领取。")),List.of(),buttons,2);
             }
             case "pricefilter" -> {
                 var choices=new ArrayList<ActionButton>();
                 choices.add(command("全部货种","realm prices"));
                 for(var goods:new TreeSet<>(GOODS.keySet()))choices.add(command(goods,"realm prices "+goods));
-                show(p,"选择收购货种",List.of(),List.of(),choices,2);
+                show(p,"选择货种",List.of(),List.of(),choices,2);
             }
-            case "bidform" -> {
-                usage(a.length==2,"bidform 商站");DiplomacyDesk.form(p,"张贴收购单","首格供卖家放货，第二格放买方金粒或桥亭兑换的银币，第三格供卖家领款。每单使用一种货币。","realm bid "+a[1],
-                        List.of(new DiplomacyDesk.Field("goods","小麦、原木、羊毛、皮革、干草、铜锭或铁锭","小麦",8),
-                                new DiplomacyDesk.Field("lot","每批件数","8",2),new DiplomacyDesk.Field("price","每批金额","2",2),new DiplomacyDesk.Field("lots","收购批数","4",4),new DiplomacyDesk.Field("coin","支付币种（金或银）","金",2)));
+            case "bidform","askform" -> {
+                usage(a.length==2,a[0]+" 商站");boolean ask=a[0].equals("askform");
+                DiplomacyDesk.form(p,ask?"张贴出售单":"张贴收购单","第二格先备一批"+(ask?"现货":"钱币")+"。随市按全服实际成交折银定价，无成交时采用业主填写的金额。",
+                        "realm "+(ask?"ask":"bid")+" "+a[1], List.of(
+                        new DiplomacyDesk.Field("goods","小麦、原木、羊毛、皮革、干草、铜锭或铁锭","小麦",8),
+                        new DiplomacyDesk.Field("lot","每批件数","8",2),new DiplomacyDesk.Field("price",ask?"每批金额（随市最低）":"每批金额（随市最高）","2",2),
+                        new DiplomacyDesk.Field("lots","批数","4",4),new DiplomacyDesk.Field("coin","支付币种（金或银）","银",2),
+                        new DiplomacyDesk.Field("mode","固定或随市","固定",2)));
             }
-            case "bid" -> {
-                usage(a.length==6 || a.length==7,"bid 商站 货种 每批件数 每批金额 批数 [金或银]");var bin=at(p,a[1]);
+            case "bid","ask" -> {
+                usage(a.length>=6 && a.length<=8,a[0]+" 商站 货种 每批件数 金额 批数 [币种] [固定或随市]");
+                var bin=at(p,a[1]);boolean ask=a[0].equals("ask");
                 require(actor.equals(s.value("SELECT owner FROM stall WHERE id=?",a[1])),"请由商站主人出价");
-                int lot=Integer.parseInt(a[3]),price=Integer.parseInt(a[4]),lots=Integer.parseInt(a[5]);
-                require(GOODS.containsKey(a[2]) && lot>0 && lot<=64 && price>0 && price<=64 && lots>0 && lots<=4096,"货种或报价超出范围");
-                var currency=a.length==7?TollCoin.parse(a[6]):TollCoin.GOLD;
-                var coins=bin.getSnapshotInventory().getItem(1);
-                require(coins!=null && coins.isSimilar(currency.stack(1)) && coins.getAmount()>=price,"商站第二格须有至少一批实付"+currency.label);
-                s.update("INSERT INTO bid(stall,goods,lot,price,remaining,currency) VALUES(?,?,?,?,?,?)",a[1],a[2],lot,price,lots,currency.name());realm.changed();page(p,a[1],1);
+                int lot=Integer.parseInt(a[3]),limit=Integer.parseInt(a[4]),lots=Integer.parseInt(a[5]);
+                require(GOODS.containsKey(a[2]) && lot>0 && lot<=64 && limit>0 && limit<=64 && lots>0 && lots<=4096,"货种或报价超出范围");
+                var currency=a.length>=7?TollCoin.parse(a[6]):TollCoin.GOLD;
+                require(a.length<8 || Set.of("固定","随市").contains(a[7]),"定价方式请选择固定或随市");
+                boolean floating=a.length==8 && a[7].equals("随市");
+                s.atomic(()->{
+                    s.update("INSERT INTO bid(stall,goods,lot,price,remaining,currency,ask,floating) VALUES(?,?,?,?,?,?,?,?)",
+                            a[1],a[2],lot,limit,lots,currency.name(),ask?1:0,floating?1:0);
+                    require(enough(bin.getSnapshotInventory().getItem(1),ownerLot(bids.offer(s.number("SELECT last_insert_rowid()")))),
+                            ask?"第二格须有至少一批现货":"商站第二格须有至少一批实付"+currency.label);
+                    return null;
+                });
+                realm.changed();page(p,a[1],1);
             }
-            case "sell" -> {
-                usage(a.length==2,"sell 收购单号");int id=Integer.parseInt(a[1]);
-                String site=s.value("SELECT stall FROM bid WHERE id=?",id);require(site!=null,"未知收购单");var bin=at(p,site);
-                require(!actor.equals(s.value("SELECT owner FROM stall WHERE id=?",site)),"本家不能向自己的订单报交");
-                String goods=s.value("SELECT goods FROM bid WHERE id=?",id);int lot=s.number("SELECT lot FROM bid WHERE id=?",id),price=s.number("SELECT price FROM bid WHERE id=?",id);
-                require(s.number("SELECT remaining FROM bid WHERE id=?",id)>0,"本单已结");
-                var inv=bin.getSnapshotInventory();var offered=inv.getItem(0);var cash=inv.getItem(1);
-                require(actor.equals(bin.getPersistentDataContainer().get(vendor,PersistentDataType.STRING)),"请先本人放货");
-                require(offered!=null && offered.isSimilar(new ItemStack(GOODS.get(goods))) && offered.getAmount()>=lot,"首格待交货物不足");
-                var currency=TollCoin.parse(s.value("SELECT currency FROM bid WHERE id=?",id));
-                require(cash!=null && cash.isSimilar(currency.stack(1)) && cash.getAmount()>=price,"柜中实付"+currency.label+"不足，本批暂缓交割");
-                require(inv.getItem(2)==null,"请先取走上笔找付");
-                int slot=-1;
-                for(int n=3;n<inv.getSize();n++){var stock=inv.getItem(n);if(stock==null || stock.isSimilar(offered) && stock.getAmount()+lot<=64){slot=n;break;}}
-                require(slot>=0,"收货柜已满");var stock=inv.getItem(slot);
-                inv.setItem(slot,new ItemStack(GOODS.get(goods),lot+(stock==null?0:stock.getAmount())));
-                inv.setItem(0,offered.getAmount()==lot?null:new ItemStack(GOODS.get(goods),offered.getAmount()-lot));
-                inv.setItem(1,cash.getAmount()==price?null:cash.asQuantity(cash.getAmount()-price));
-                inv.setItem(2,cash.asQuantity(price));
-                bin.getPersistentDataContainer().set(receipt,PersistentDataType.STRING,UUID.randomUUID()+" "+id+" "+actor);
-                require(bin.update(),"柜桶已改变");realm.world.save(true);recover((Barrel)bin.getBlock().getState());
-                p.sendMessage("本批交割完成，请从第三格取走 "+price+" "+currency.label);page(p,site,1);
-            }
+            case "sell","buy" -> settle(p,a);
         }
     }
     private String funding(MarketBids.Offer offer){
@@ -139,19 +177,19 @@ final class MarketOffice implements Listener {
         if(!w.isChunkLoaded(offer.x()>>4,offer.z()>>4))return "待到访验资";
         if(!(w.getBlockAt(offer.x(),offer.y(),offer.z()).getState() instanceof Barrel bin) ||
                 !offer.stall().equals(bin.getPersistentDataContainer().get(market,PersistentDataType.STRING)))return "柜桶待修";
-        var cash=bin.getSnapshotInventory().getItem(1);
-        return cash!=null && cash.isSimilar(offer.currency().stack(1)) && cash.getAmount()>=offer.price()
-                ? "现款可付一批" : "等待买家补款";
+        boolean stocked=enough(bin.getSnapshotInventory().getItem(1),ownerLot(offer));
+        if(offer.ask())return stocked?"现货可卖一批":"等待业主补货";
+        return stocked?"现款可付一批":"等待买家补款";
     }
     private void board(Player p,String goods,int page)throws SQLException{
         var listed=bids.listed(null,goods.equals("全部")?null:goods,page);
         var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();
-        body.add(text("同种货物按每件折银从高到低排列。现款按查看时核对，多张买单可共用一柜。"));
+        body.add(text("同种货物先列高价收购，再列低价出售。现款与现货由各家自备。"));
         for(var offer:listed.offers()){
             body.add(text(offer.name()+"　("+offer.x()+", "+offer.y()+", "+offer.z()+")\n"+offer.quote()+"　"+funding(offer)));
             buttons.add(command("查看 #"+offer.id()+" · "+offer.name(),"realm quote "+offer.id()));
         }
-        if(listed.offers().isEmpty())body.add(text("当前没有此类收购单。"));
+        if(listed.offers().isEmpty())body.add(text("当前没有此类订单。"));
         navigation(buttons,"realm prices "+goods,page,listed.more());
         buttons.add(command("选择货种","realm pricefilter"));
         show(p,"各地行情 · "+goods+" · 第"+page+"页",body,List.of(),buttons,2);
@@ -164,14 +202,16 @@ final class MarketOffice implements Listener {
         try(var q=s.sql("SELECT name,x,y,z,owner FROM stall WHERE id=? AND x IS NOT NULL",site);var r=q.executeQuery()){
             require(r.next(),"商站已撤或未登记");
             var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
-            body.add(text("商柜坐标　"+r.getInt(2)+", "+r.getInt(3)+", "+r.getInt(4)+"\n第一格放货，第二格放买方钱币，第三格由卖家领款。"));
+            body.add(text("商柜坐标　"+r.getInt(2)+", "+r.getInt(3)+", "+r.getInt(4)+"\n第一格由来客放货或付款，第二格由业主备款或备货，第三格由来客领取。"));
             var listed=bids.listed(site,null,page);
             for(var offer:listed.offers()){
                 body.add(text("#"+offer.id()+"　"+offer.quote()));
-                buttons.add(command("交付 #"+offer.id(),"realm sell "+offer.id()));
+                buttons.add(command((offer.ask()?"买入 #":"卖给 #")+offer.id(),offer.deal()));
             }
-            if(listed.offers().isEmpty())body.add(text("目前没有待交割的收购单。"));
-            if(p.getUniqueId().toString().equals(r.getString(5)))buttons.add(command("出价收购","realm bidform "+site));
+            if(listed.offers().isEmpty())body.add(text("目前没有待交割的订单。"));
+            if(p.getUniqueId().toString().equals(r.getString(5))){
+                buttons.add(command("出价收购","realm bidform "+site));buttons.add(command("挂牌出售","realm askform "+site));
+            }
             navigation(buttons,"realm market "+site,page,listed.more());
             buttons.add(command("各地行情","realm prices"));
             show(p,r.getString(1),body,List.of(),buttons,2);

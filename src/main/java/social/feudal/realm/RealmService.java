@@ -114,7 +114,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
-                case "prices","quote","pricefilter","stall","market","bidform","bid","sell" -> markets.run(player(s),a);
+                case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
                 case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);

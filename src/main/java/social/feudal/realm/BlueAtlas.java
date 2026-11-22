@@ -47,7 +47,7 @@ final class BlueAtlas implements Runnable {
                 while(r.next())put(hearings,r.getString(1),r.getString(2)+"公示 #"+r.getInt(1),16*r.getInt(3),16*r.getInt(4),16*(r.getInt(5)+1),16*(r.getInt(6)+1),0xb55c37);
             }
             var tolls=bridgeMarkers(s);
-            var markets=new MarkerSet("商站与收购",true,false);
+            var markets=new MarkerSet("玩家商站",true,false);
             try(var q=s.sql("""
                     SELECT t.id,t.name,t.x,t.y,t.z,count(b.id) FROM stall t
                     LEFT JOIN bid b ON b.stall=t.id AND b.remaining>0 WHERE t.x IS NOT NULL
@@ -55,7 +55,7 @@ final class BlueAtlas implements Runnable {
                 while(r.next()){
                     String name=escape(r.getString(2));
                     markets.put(r.getString(1),POIMarker.builder().label(name)
-                            .detail("<strong>"+name+"</strong><br>在榜收购单　"+r.getInt(6)+" 份<br>游戏内输入 /realm prices 比价")
+                            .detail("<strong>"+name+"</strong><br>在榜订单　"+r.getInt(6)+" 份<br>游戏内输入 /realm prices 比价")
                             .position(r.getInt(3)+.5,r.getInt(4)+1.5,r.getInt(5)+.5).defaultIcon().build());
                 }
             }

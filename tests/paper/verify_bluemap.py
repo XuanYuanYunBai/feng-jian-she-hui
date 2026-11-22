@@ -74,7 +74,7 @@ def check_markets(db, markers):
     for key, (name, x, y, z, offers) in stalls.items():
         pin = markers[key]
         if (html.unescape(pin["label"]) != name or pin["position"] != dict(x=x+.5, y=y+1.5, z=z+.5)
-                or f"在榜收购单　{offers} 份" not in pin["detail"]):
+                or not any(f"{label}　{offers} 份" in pin["detail"] for label in ("在榜收购单", "在榜订单"))):
             raise ValueError("商站位置或买单公示不符 " + key)
     return f"，{len(stalls)} 座商站"
 
