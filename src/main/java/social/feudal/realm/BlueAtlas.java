@@ -40,8 +40,8 @@ final class BlueAtlas implements Runnable {
                 }
                 if(id!=null)span(countries,empire,id,names.get(id),inside.get(id),west,east,z);
             }
-            try(var q=s.sql("SELECT id,name,west,north,east,south FROM manor");var r=q.executeQuery()){
-                while(r.next())put(estates,r.getString(1),r.getString(2),r.getInt(3),r.getInt(4),r.getInt(5)+1,r.getInt(6)+1,0x4e9b72);
+            try(var q=s.sql("SELECT id,name,west,north,east,south,residents FROM manor");var r=q.executeQuery()){
+                while(r.next())put(estates,r.getString(1),r.getString(2)+" · "+r.getInt(7)+" 人",r.getInt(3),r.getInt(4),r.getInt(5)+1,r.getInt(6)+1,0x4e9b72);
             }
             try(var q=s.sql("SELECT id,type,west,north,east,south FROM claim WHERE state='公示中'");var r=q.executeQuery()){
                 while(r.next())put(hearings,r.getString(1),r.getString(2)+"公示 #"+r.getInt(1),16*r.getInt(3),16*r.getInt(4),16*(r.getInt(5)+1),16*(r.getInt(6)+1),0xb55c37);

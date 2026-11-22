@@ -24,6 +24,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final ManorOffice manors;
     final MillOffice mills;
     final FirstHolding firstHolding;
+    final FoundingVillages villages;
+    final RefugeOffice refuge;
     final CrossingOffice crossings;
     public final social.feudal.transport.HaulNetwork roads;
     public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
@@ -56,7 +58,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
-        firstHolding=new FirstHolding(this);
+        firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
@@ -116,14 +118,18 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 usage(a.length<=2,"init [在线皇帝名]");
                 var l=world.getSpawnLocation();
                 store.initialize(world.getUID().toString(),l.getBlockX()>>4,l.getBlockZ()>>4,a.length==2?actor(a[1]):"npc-皇廷署理");
-                council.succession.sync();taxes.openPeriod(1);restoreMap();changed();markers.refresh();s.sendMessage("河湾帝国及初始成员已登记。使用 /realm atlas");return true;
+                villages.enroll();council.succession.sync();taxes.openPeriod(1);restoreMap();changed();markers.refresh();s.sendMessage("河湾帝国及初始成员已登记。使用 /realm atlas");return true;
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "foundingvillages" -> {
+                    RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要开服管理权限");
+                    villages.enroll();s.sendMessage("已登记三处初始民房的选址任务。既有聚落和首粮不会重复发放。");
+                }
                 case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
-                case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
-                case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
+                case "kitchen","mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
+                case "asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);

@@ -26,7 +26,7 @@ final class Bakehouse implements Listener {
     private static final NamespacedKey VANILLA_BREAD=NamespacedKey.minecraft("bread");
     private final RealmService realm;
     final ItemStack flour;
-    private final ItemStack dough;
+    final ItemStack dough;
     private final NamespacedKey hearth,oldLoaf;
     private Recipe replacedBread;
     private record Batch(Block board,int slot,int strokes,long tick){}
@@ -125,6 +125,9 @@ final class Bakehouse implements Listener {
         }
         return false;
     }
+    boolean boardReady(Block board){
+        return Tag.WOODEN_SLABS.isTagged(board.getType()) && board.getRelative(BlockFace.UP).isEmpty() && besideWater(board);
+    }
     @EventHandler(ignoreCancelled=true) public void knead(PlayerInteractEvent e){
         if(e.getHand()!=EquipmentSlot.HAND || e.getAction()!=Action.RIGHT_CLICK_BLOCK)return;
         var p=e.getPlayer();var board=e.getClickedBlock();
@@ -132,7 +135,7 @@ final class Bakehouse implements Listener {
         var held=p.getInventory().getItemInMainHand();
         if(!held.isSimilar(flour))return;
         e.setCancelled(true);
-        if(!board.getRelative(BlockFace.UP).isEmpty() || !besideWater(board)){
+        if(!boardReady(board)){
             p.sendActionBar(Component.text("案面上方留空，旁边一格留水（可低一格）"));return;
         }
         if(held.getAmount()<3){p.sendActionBar(Component.text("请把三份小麦粉放在同一个主手格"));return;}

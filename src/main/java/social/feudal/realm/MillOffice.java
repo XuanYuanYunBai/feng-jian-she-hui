@@ -31,6 +31,7 @@ final class MillOffice implements Listener {
     private final FootNavigation navigation;
     private final NamespacedKey loadTarget;
     final Bakehouse baking;
+    private final KitchenDuty kitchen;
     MillOffice(RealmService r)throws SQLException{
         realm=r;s=r.store;navigation=new FootNavigation(r.plugin);loadTarget=new NamespacedKey(r.plugin,"field_target");
         s.update("CREATE TABLE IF NOT EXISTS mill(id TEXT PRIMARY KEY,manor TEXT REFERENCES manor(id),x INTEGER,y INTEGER,z INTEGER,tier INTEGER,UNIQUE(x,y,z))");
@@ -40,7 +41,7 @@ final class MillOffice implements Listener {
             role TEXT,quota INTEGER NOT NULL,status TEXT NOT NULL,worker TEXT,UNIQUE(worker))""");
         if(s.number("SELECT count(*) FROM pragma_table_info('farmhand') WHERE name='delivered_flour'")==0)
             s.update("ALTER TABLE farmhand ADD COLUMN delivered_flour INTEGER NOT NULL DEFAULT 0");
-        baking=new Bakehouse(r);
+        baking=new Bakehouse(r);kitchen=new KitchenDuty(r,baking,navigation);
         Bukkit.getPluginManager().registerEvents(this,r.plugin);
         Bukkit.getScheduler().runTaskTimer(r.plugin,this::tick,20,10);
     }
@@ -65,7 +66,7 @@ final class MillOffice implements Listener {
     }
     private void local(Player p,Mill m)throws SQLException{
         require(p.getLocation().distanceSquared(door(m))<100,"请到磨坊办理");
-        require(realm.manors.register.manor(m.manor()).owner().equals(p.getUniqueId().toString()),"须由房主派工");
+        require(realm.manors.register.manages(realm.manors.register.manor(m.manor()),p.getUniqueId().toString()),"须由房主派工");
     }
     private int count(String sql,Object...args)throws SQLException{return s.number(sql,args);}
     void run(Player p,String[] a)throws SQLException{
@@ -75,7 +76,7 @@ final class MillOffice implements Listener {
             case "watermill" -> {
                 usage(a.length==3,"watermill 庄园ID 磨坊ID");Politics.id(a[2]);
                 var m=realm.manors.register.manor(a[1]);var b=p.getTargetBlockExact(6);
-                require(b!=null && m.estate().contains(b.getX(),b.getZ()) && m.owner().equals(p.getUniqueId().toString()),"请在本人庄内瞄准磨石");
+                require(b!=null && m.estate().contains(b.getX(),b.getZ()) && realm.manors.register.manages(m,p.getUniqueId().toString()),"请在本人庄内瞄准磨石");
                 var site=new Mill(a[2],m.id(),b.getX(),b.getY(),b.getZ(),1);
                 require(usable(site),"磨石东侧设粮桶、西侧设种桶、北侧留作业门，南侧两格内设水和活板轮叶");
                 require(count("SELECT count(*) FROM mill WHERE id=? OR (x=? AND y=? AND z=?)",site.id(),site.x(),site.y(),site.z())==0,"磨坊代号或磨石已登记");
@@ -91,7 +92,7 @@ final class MillOffice implements Listener {
             }
             case "field" -> {
                 usage(a.length==8,"field 磨坊 地主庄园 西 北 东 南 耕地Y");var m=get(a[1]);var estate=realm.manors.register.manor(a[2]);
-                require(estate.owner().equals(p.getUniqueId().toString()),"须持田产办理托管");var b=new Charters.Bounds(Integer.parseInt(a[3]),Integer.parseInt(a[4]),Integer.parseInt(a[5]),Integer.parseInt(a[6]));
+                require(realm.manors.register.manages(estate,p.getUniqueId().toString()),"须持田产办理托管");var b=new Charters.Bounds(Integer.parseInt(a[3]),Integer.parseInt(a[4]),Integer.parseInt(a[5]),Integer.parseInt(a[6]));
                 int y=Integer.parseInt(a[7]);
                 require(b.area()<=1024 && estate.estate().contains(b.west(),b.north()) && estate.estate().contains(b.east(),b.south()),"请在本庄选田，单次最多勘测 1024 平方格");
                 require(usable(m) && p.getLocation().distanceSquared(door(m))<=10000,"请到磨坊附近勘界");
@@ -108,6 +109,16 @@ final class MillOffice implements Listener {
                     return added;
                 });p.sendMessage("实际走路范围内，新登记 "+n+" 格耕地");page(p,m);
             }
+            case "kitchen" -> {
+                usage(a.length==3,"kitchen 磨坊 木案|营火|常设|停办");var m=get(a[1]);local(p,m);
+                if(a[2].equals("常设")){
+                    require(count("SELECT count(*) FROM kitchen WHERE mill=?",m.id())==2,"请先登记木案和营火");
+                    s.update("INSERT OR IGNORE INTO kitchen_duty VALUES(?)",m.id());
+                    standing(m);
+                }else if(a[2].equals("停办"))s.update("DELETE FROM kitchen_duty WHERE mill=?",m.id());
+                else kitchen.register(p,m,a[2]);
+                page(p,m);
+            }
             case "farmjob" -> {
                 usage(a.length==3 && Set.of("收麦","补种","磨粉").contains(a[2]),"farmjob 磨坊 收麦|补种|磨粉");
                 var m=get(a[1]);local(p,m);require(usable(m),"设施损坏，请复验入口、仓桶与动力");
@@ -115,8 +126,9 @@ final class MillOffice implements Listener {
                 if(a[2].equals("收麦"))require(season%4==2,"秋季可派收割工，当前为"+seasonName(season));
                 if(a[2].equals("补种"))require(season%4==0,"春季可派播种工，当前为"+seasonName(season));
                 require(count("SELECT count(*) FROM farmhand WHERE mill=? AND season=? AND "+(a[2].equals("磨粉")?"role='磨粉'":"role<>'磨粉'"),m.id(),season)<(a[2].equals("磨粉")?1:m.workers()),"本季相应工位已分配");
-                require(count("SELECT count(*) FROM farmhand JOIN mill ON mill.id=farmhand.mill WHERE manor=? AND season=?",m.manor(),season)<realm.manors.register.manor(m.manor()).households(),"庄内本季已无空闲劳力");
-                s.update("INSERT INTO farmhand(mill,season,role,quota,status) VALUES(?,?,?,64,'已派工')",m.id(),season,a[2]);page(p,m);
+                int quota=remainingHours(m,season);
+                require(quota>0,"庄内本季已无空闲工时");
+                s.update("INSERT INTO farmhand(mill,season,role,quota,status) VALUES(?,?,?,?,?)",m.id(),season,a[2],quota,"已派工");page(p,m);
             }
         }
     }
@@ -137,8 +149,24 @@ final class MillOffice implements Listener {
         body.add(text(seasonName(realm.manors.register.season())+"　｜　庄园　"+realm.manors.register.manor(m.manor()).name()+"　｜　"+m.tier()+" 级水磨"));
         body.add(text("田务路程 "+m.radius()+" 格　｜　登记 "+count("SELECT count(*) FROM field WHERE mill=?",m.id())+" / "+m.capacity()+" 格　｜　田工 "+m.workers()+" 席"));
         for(var line:realm.diplomacy.column("SELECT role || ' · ' || status || '　剩余工时 ' || quota FROM farmhand WHERE mill=? AND season=? ORDER BY id",m.id(),realm.manors.register.season()))body.add(text(line));
-        show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一户收麦","realm farmjob "+m.id()+" 收麦"),command("派一户补种","realm farmjob "+m.id()+" 补种"),
-                command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
+        boolean standing=count("SELECT count(*) FROM kitchen_duty WHERE mill=?",m.id())>0;
+        body.add(text("常设工班将口粮送回厅旁木桶，储足两季及三份赈粮后春播秋收。木案与营火旁须留通道。"));
+        show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一班收麦","realm farmjob "+m.id()+" 收麦"),command("派一班补种","realm farmjob "+m.id()+" 补种"),
+                command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("登记眼前木案","realm kitchen "+m.id()+" 木案"),
+                command("登记眼前营火","realm kitchen "+m.id()+" 营火"),command(standing?"下季停办口粮":"常设口粮工班","realm kitchen "+m.id()+(standing?" 停办":" 常设")),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
+    }
+    private int remainingHours(Mill m,int season)throws SQLException{
+        int people=realm.manors.register.manor(m.manor()).residents();
+        int missing=count("SELECT shortfall FROM population_season WHERE manor=? ORDER BY season DESC LIMIT 1",m.manor());
+        int hours=(int)((long)Math.max(0,people-missing)*64/100);
+        int assigned=count("SELECT count(*) FROM farmhand JOIN mill ON mill.id=farmhand.mill WHERE manor=? AND season=?",m.manor(),season);
+        return Math.min(64,hours-assigned*64);
+    }
+    private void standing(Mill m)throws SQLException{
+        int season=realm.manors.register.season();
+        if(count("SELECT count(*) FROM farmhand WHERE mill=? AND role='口粮' AND (season=? OR status<>'结工')",m.id(),season)>0)return;
+        int hours=remainingHours(m,season);
+        if(hours>0)s.update("INSERT INTO farmhand(mill,season,role,quota,status) VALUES(?,?,'口粮',?,'已派工')",m.id(),season,hours);
     }
     private void status(int id,String value)throws SQLException{
         s.update("UPDATE farmhand SET status=? WHERE id=? AND status<>?",value,id,value);
@@ -148,6 +176,7 @@ final class MillOffice implements Listener {
     private void tick(){
         if(Bukkit.getOnlinePlayers().isEmpty())return;
         try{
+            if(realm.world.getGameTime()%200<10)for(var key:realm.diplomacy.column("SELECT mill FROM kitchen_duty ORDER BY mill"))standing(get(key));
             for(var key:realm.diplomacy.column("SELECT id FROM farmhand WHERE status<>'结工' ORDER BY id"))work(Integer.parseInt(key));
         }catch(SQLException ex){realm.plugin.getLogger().log(Level.WARNING,"磨坊派工失败",ex);}
     }
@@ -158,16 +187,32 @@ final class MillOffice implements Listener {
         }
         if(!realm.world.isChunkLoaded(m.x()>>4,m.z()>>4))return;
         if(!usable(m)){status(id,"设施待修");return;}
+        final String assignedRole=role;
         Mannequin npc;
         if(uuid==null){
             npc=realm.world.spawn(door(m),Mannequin.class,e->{
                 e.setPersistent(true);e.setImmovable(false);e.setInvulnerable(true);e.setCollidable(false);e.setDescription(null);
-                e.customName(Component.text(role.equals("磨粉")?"庄园磨工":"庄园田工"));e.setCustomNameVisible(true);NpcSkins.apply(e,"granary");
+                e.customName(Component.text(assignedRole.equals("口粮")?"庄园烘焙工":assignedRole.equals("磨粉")?"庄园磨工":"庄园田工"));e.setCustomNameVisible(true);NpcSkins.apply(e,"granary");
             });
             s.update("UPDATE farmhand SET worker=? WHERE id=?",npc.getUniqueId().toString(),id);
         }else if(realm.world.getEntity(UUID.fromString(uuid)) instanceof Mannequin worker)npc=worker;else return;
         var cargo=new PorterCargo(npc,null);var grain=bin(m,false);var seed=bin(m,true);
         boolean finished=quota<=0 || season!=realm.manors.register.season();
+        if(role.equals("口粮")){
+            var load=cargo.getItem(0);
+            boolean farmLoad=load!=null && (load.getType()==Material.WHEAT || load.getType()==Material.WHEAT_SEEDS);
+            if(farmLoad){
+                role=season%4==0?"补种":"收麦";
+            }else{
+                var result=npc.getPersistentDataContainer().has(loadTarget) && !finished?"口粮储备充足":kitchen.work(id,m,npc,grain,wheel(m),finished);
+                if(!result.equals("口粮储备充足") && !result.equals("缺麦与面粉")){status(id,result);return;}
+                boolean harvest=season%4==2;
+                if(finished || (!harvest && (season%4!=0 || !seed.contains(Material.WHEAT_SEEDS))) || next(m,harvest)==null){
+                    status(id,result);return;
+                }
+                role=harvest?"收麦":"补种";
+            }
+        }
         if(cargo.getItem(0)!=null && !role.equals("补种") || finished){
             if(!arrive(npc,door(m),id,"返仓"))return;
             for(int slot=0;slot<cargo.getSize();slot++){

@@ -79,7 +79,7 @@ public final class TransportCrew implements Listener {
     private static void require(boolean b,String reason){if(!b)throw new IllegalArgumentException(reason);}
     public boolean isCarrier(Mannequin body){
         String id=body.getPersistentDataContainer().get(worker,PersistentDataType.STRING);
-        return id!=null && (id.startsWith("tax/") || id.startsWith("station/") || id.startsWith("boat/"));
+        return id!=null && (id.startsWith("tax/") || id.startsWith("station/") || id.startsWith("boat/") || id.startsWith("migration/"));
     }
     public boolean busy(Team team){return team.porter().getPersistentDataContainer().has(busy);}
     public void active(Team team,boolean value){

@@ -63,16 +63,16 @@ class PoliticsTest {
             assertArrayEquals(site,r.nearestYard(ALICE,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.UNSEEN));
             var yard=FirstHolding.yard(site[0],site[1]);
             r.available(ALICE,yard);
-            var cottage=new SettlementRegister.Manor("brook","溪庄",ALICE,site[0],64,site[1],yard,1,0,true);
+            var cottage=new SettlementRegister.Manor("brook","溪庄",ALICE,site[0],64,site[1],yard,100,0,true);
             r.estate(cottage);
-            assertEquals(1,r.manor("brook").households());
+            assertEquals(100,r.manor("brook").residents());
             assertTrue(r.manor("brook").cottage());
             assertFalse(java.util.Arrays.equals(site,r.nearestYard(BOB,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.DRY)));
             assertThrows(IllegalArgumentException.class,()->r.available(BOB,yard));
             var next=FirstHolding.yard(-404,-404);
-            assertThrows(IllegalArgumentException.class,()->r.estate(new SettlementRegister.Manor("again","新庄",ALICE,-404,64,-404,next,1,0,true)));
+            assertThrows(IllegalArgumentException.class,()->r.estate(new SettlementRegister.Manor("again","新庄",ALICE,-404,64,-404,next,100,0,true)));
             assertThrows(IllegalArgumentException.class,()->r.estate("ordinary","分庄",ALICE,-404,64,-404,next));
-            assertEquals(1,r.manor("brook").households());
+            assertEquals(100,r.manor("brook").residents());
             assertNull(s.owner(site[0]>>4,site[1]>>4));
         }
     }
@@ -81,7 +81,7 @@ class PoliticsTest {
             var r=new SettlementRegister(s);var b=new Charters.Bounds(480,480,495,495);var chunks=new Charters.Bounds(30,30,31,30);
             r.estate("west","西庄",ALICE,481,64,481,b);
             assertThrows(IllegalArgumentException.class,()->r.propose(ALICE,"west","west","入帝",chunks,1,100));
-            s.update("UPDATE manor SET households=6,service=1");
+            s.update("UPDATE manor SET residents=600,service=1");
             assertThrows(IllegalArgumentException.class,()->r.propose(ALICE,"west","west","独立",chunks,1,100));
             int n=r.propose(ALICE,"west","west","入帝",chunks,1,100);
             r.object(n,BOB,31,30,"既有租约");s.update("INSERT INTO setting VALUES('season',1)");

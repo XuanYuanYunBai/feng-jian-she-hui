@@ -33,6 +33,11 @@ public final class RealmStore implements AutoCloseable {
                 Path backup=path.resolveSibling(path.getFileName()+".pre-0.5.0");
                 if(!Files.exists(backup))try(var statement=sql("VACUUM INTO ?",backup.toString())){statement.execute();}
             }
+            if(value("SELECT name FROM sqlite_master WHERE name='manor'")!=null
+                    && number("SELECT count(*) FROM pragma_table_info('manor') WHERE name='residents'")==0){
+                Path backup=path.resolveSibling(path.getFileName()+".pre-0.11.0");
+                if(!Files.exists(backup))try(var statement=sql("VACUUM INTO ?",backup.toString())){statement.execute();}
+            }
             politics=new Politics(this);
         } catch (SQLException | RuntimeException ex) { db.close(); throw ex; }
     }

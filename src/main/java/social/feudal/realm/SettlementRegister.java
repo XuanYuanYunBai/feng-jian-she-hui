@@ -5,7 +5,7 @@ import java.util.*;
 import static social.feudal.realm.RealmStore.require;
 
 final class SettlementRegister {
-    record Manor(String id,String name,String owner,int x,int y,int z,Charters.Bounds estate,int households,int service,boolean cottage){}
+    record Manor(String id,String name,String owner,int x,int y,int z,Charters.Bounds estate,int residents,int service,boolean cottage){}
     record Claim(int id,String manor,String title,String type,Charters.Bounds area,String state,int season,long until){}
     final RealmStore s;
     SettlementRegister(RealmStore s)throws SQLException{
@@ -16,6 +16,23 @@ final class SettlementRegister {
             service INTEGER NOT NULL DEFAULT 0,settled INTEGER NOT NULL DEFAULT 0)""");
         if(s.number("SELECT count(*) FROM pragma_table_info('manor') WHERE name='cottage'")==0)
             s.update("ALTER TABLE manor ADD COLUMN cottage INTEGER NOT NULL DEFAULT 0");
+        if(s.number("SELECT count(*) FROM pragma_table_info('manor') WHERE name='residents'")==0){
+            s.atomic(()->{
+                try(var q=s.sql("ALTER TABLE manor ADD COLUMN residents INTEGER NOT NULL DEFAULT 0 CHECK(residents>=0)")){q.execute();}
+                s.update("ALTER TABLE manor ADD COLUMN housing INTEGER NOT NULL DEFAULT 0");
+                s.update("ALTER TABLE manor ADD COLUMN grace_until INTEGER NOT NULL DEFAULT 0");
+                s.update("ALTER TABLE manor ADD COLUMN last_season INTEGER NOT NULL DEFAULT 0");
+                s.update("ALTER TABLE manor ADD COLUMN ration_credit INTEGER NOT NULL DEFAULT 0");
+                s.update("ALTER TABLE manor ADD COLUMN growth_remainder INTEGER NOT NULL DEFAULT 0");
+                s.update("ALTER TABLE manor ADD COLUMN shortages INTEGER NOT NULL DEFAULT 0");
+                s.update("UPDATE manor SET residents=households*100,housing=households*100,grace_until=?,last_season=?",season()+1,season());
+                return null;
+            });
+        }
+        s.update("""
+            CREATE TABLE IF NOT EXISTS population_season(manor TEXT REFERENCES manor(id),season INTEGER,
+            opening INTEGER,capacity INTEGER,bread INTEGER,shortfall INTEGER,births INTEGER,deaths INTEGER,
+            closing INTEGER,PRIMARY KEY(manor,season))""");
         s.update("""
             CREATE TABLE IF NOT EXISTS claim(id INTEGER PRIMARY KEY,manor TEXT REFERENCES manor(id),title TEXT NOT NULL,
             type TEXT NOT NULL,west INTEGER,north INTEGER,east INTEGER,south INTEGER,state TEXT NOT NULL,season INTEGER,until INTEGER)""");
@@ -29,11 +46,17 @@ final class SettlementRegister {
     Manor manor(String id)throws SQLException{
         try(var q=s.sql("SELECT * FROM manor WHERE id=?",id);var r=q.executeQuery()){
             require(r.next(),"未知庄园");return new Manor(id,r.getString("name"),r.getString("owner"),r.getInt("x"),r.getInt("y"),r.getInt("z"),
-                    new Charters.Bounds(r.getInt("west"),r.getInt("north"),r.getInt("east"),r.getInt("south")),r.getInt("households"),r.getInt("service"),r.getBoolean("cottage"));
+                    new Charters.Bounds(r.getInt("west"),r.getInt("north"),r.getInt("east"),r.getInt("south")),r.getInt("residents"),r.getInt("service"),r.getBoolean("cottage"));
         }
     }
     void estate(String id,String name,String actor,int x,int y,int z,Charters.Bounds b)throws SQLException{
-        estate(new Manor(id,name,actor,x,y,z,b,3,0,false));
+        estate(new Manor(id,name,actor,x,y,z,b,300,0,false));
+    }
+    boolean manages(Manor manor,String actor)throws SQLException{
+        if(manor.owner().equals(actor))return true;
+        if(!manor.owner().startsWith("公产·"))return false;
+        String title=s.owner(manor.x()>>4,manor.z()>>4);
+        return title!=null && s.title(title).seal().equals(actor);
     }
     void available(String actor,Charters.Bounds b)throws SQLException{
         require(s.number("SELECT count(*) FROM manor WHERE west<=? AND east>=? AND north<=? AND south>=?",b.east(),b.west(),b.south(),b.north())==0,"与已有庄园重叠");
@@ -64,7 +87,8 @@ final class SettlementRegister {
             return unexplored;
         }
     }
-    void estate(Manor m)throws SQLException{
+    void estate(Manor m)throws SQLException{estate(m,0);}
+    void estate(Manor m,int capacity)throws SQLException{
         String id=m.id(), actor=m.owner();
         var b=m.estate();
         Politics.id(id);Politics.wording(m.name(),30);
@@ -72,15 +96,36 @@ final class SettlementRegister {
         s.atomic(()->{
             require(s.value("SELECT id FROM manor WHERE id=? UNION SELECT id FROM title WHERE id=?",id,id)==null,"庄园代号已用");
             available(actor,b);
+            int residents=100;
             if(s.number("SELECT count(*) FROM manor WHERE owner=?",actor)>0){
-                require(!m.cottage(),"一户起家只适用于首庄");
-                String source=s.value("SELECT id FROM manor WHERE owner=? AND households>=4 ORDER BY households DESC,id LIMIT 1",actor);
-                require(source!=null,"另立庄园需要从已有庄园派出三户，原庄至少留一户");
-                s.update("UPDATE manor SET households=households-3 WHERE id=?",source);
+                require(!m.cottage(),"安家只适用于首庄");
+                String source=s.value("SELECT id FROM manor WHERE owner=? AND residents>=400 AND last_season=? ORDER BY residents DESC,id LIMIT 1",actor,season());
+                require(source!=null,"分庄需要从已结季账的聚落实迁 300 人，原庄至少留 100 人");
+                s.update("UPDATE manor SET residents=residents-300 WHERE id=?",source);
+                residents=300;
             }
-            s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,households,cottage) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                    id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),m.cottage()?1:3,m.cottage()?1:0);return null;
+            s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,residents,cottage,last_season,housing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),residents,m.cottage()?1:0,season(),capacity);return null;
         });
+    }
+    // Residence follows the hall's public jurisdiction. Revenue grants and imperial membership have no vote here.
+    record Census(String id,String name,int population,int direct,int capacity,int villages){}
+    List<Census> census()throws SQLException{
+        var rows=new ArrayList<Census>();
+        try(var q=s.sql("""
+                WITH districts(id,name) AS (SELECT n.id,t.name FROM nation n JOIN title t USING(id)
+                    UNION ALL SELECT 'crown',name FROM title WHERE id='crown' UNION ALL SELECT '@','未建领聚落'),
+                homes AS (SELECT m.*,l.title,coalesce(a.nation,l.title,'@') AS district
+                    FROM manor m LEFT JOIN land l ON l.x=(m.x>>4) AND l.z=(m.z>>4)
+                    LEFT JOIN affiliation a ON a.title=l.title)
+                SELECT d.id,d.name,coalesce(sum(h.residents),0),
+                    coalesce(sum(CASE WHEN h.title=d.id THEN h.residents ELSE 0 END),0),
+                    coalesce(sum(h.housing),0),count(h.id)
+                FROM districts d LEFT JOIN homes h ON h.district=d.id GROUP BY d.id,d.name ORDER BY d.name""");
+            var r=q.executeQuery()){
+            while(r.next())rows.add(new Census(r.getString(1),r.getString(2),r.getInt(3),r.getInt(4),r.getInt(5),r.getInt(6)));
+        }
+        return rows;
     }
     int season()throws SQLException{return s.number("SELECT v FROM setting WHERE k='season'");}
     Claim claim(int id)throws SQLException{
@@ -116,11 +161,11 @@ final class SettlementRegister {
             require(b.contains(m.x()>>4,m.z()>>4),"须在选区内建立庄园驻地");
             if(founding){
                 require(title.equals(id) && s.value("SELECT id FROM title WHERE id=?",title)==null,"该庄园已建领或代号已占用");
-                require(m.households()>=6 && m.service()>0,"建领需要六户和连续一季公共服务");
+                require(m.residents()>=600 && m.service()>0,"建领需要 600 人和连续一季公共服务");
                 require(type.equals("入帝") || s.politics.choiceOpen(),"首位玩家皇帝即位前，新领自动加入帝国");
             }else{
                 new Charters(s).acts(title,actor);opening(title,b);adjacent(title,b);
-                require(m.households()>=Math.ceilDiv(b.area(),4),"每四个区块至少须一户派驻");
+                require(m.residents()>=100*Math.ceilDiv(b.area(),4),"每四个区块至少须 100 人派驻");
             }
             require(s.number("SELECT count(*) FROM claim WHERE manor=? AND state='公示中'",id)==0,"本庄已有在审公示");
             require(s.number("SELECT count(*) FROM land WHERE x BETWEEN ? AND ? AND z BETWEEN ? AND ?",b.west(),b.east(),b.north(),b.south())==0,"选区已有公共管辖");
@@ -142,8 +187,8 @@ final class SettlementRegister {
             boolean frontier=c.type().equals("开拓");
             if(frontier){
                 new Charters(s).acts(c.title(),actor);opening(c.title(),c.area());adjacent(c.title(),c.area());
-                require(m.households()>=Math.ceilDiv(c.area().area(),4) && m.service()>0,"开拓地需维持住户和一季供养");
-            }else require(m.households()>=6 && m.service()>0,"建领资格已变化");
+                require(m.residents()>=100*Math.ceilDiv(c.area().area(),4) && m.service()>0,"开拓地需维持住户和一季供养");
+            }else require(m.residents()>=600 && m.service()>0,"建领资格已变化");
             var cells=new ArrayList<int[]>();var b=c.area();
             for(int x=b.west();x<=b.east();x++)for(int z=b.north();z<=b.south();z++){
                 if(s.owner(x,z)!=null || s.number("SELECT count(*) FROM land_objection WHERE claim=? AND x=? AND z=?",n,x,z)>0)continue;
