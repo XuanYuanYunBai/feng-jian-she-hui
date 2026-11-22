@@ -64,10 +64,31 @@ def verify_river(server):
     print("通过 · 三份同批面包随脚夫、船工、脚夫在两处泊位交接")
 
 
+def verify_tools(server):
+    with db(server, "realm") as realm:
+        assert realm.execute("""
+            SELECT stage,status FROM pit_shift WHERE pit='rivermine' ORDER BY id
+            """).fetchall() == [(3, "已交矿一份")] * 5
+        assert realm.execute("SELECT stage,blows FROM smith_order WHERE id=2").fetchone() == (3, 3)
+        # The hand-mined cell uses the same depletion ledger as the five pit orders.
+        assert realm.execute("SELECT count(*) FROM mineral_spent").fetchone() == (6,)
+    regions = server / "feudal-world/dimensions/minecraft/overworld/region"
+    mine = read_chunk(regions, 301, 301)
+    barrel = next(b for b in mine["block_entities"] if tuple(int(b[k]) for k in "xyz") == (4823, 35, 4825))
+    items = {str(stack["id"]): stack for stack in barrel["Items"]}
+    pick = items["minecraft:iron_pickaxe"]["components"]
+    assert int(items["minecraft:raw_iron"]["count"]) == 5
+    assert int(pick["minecraft:repair_cost"]) == 1 and int(pick["minecraft:damage"]) == 48
+    print("通过 · 五次交矿、手采与工班共账、实铁修复的旧镐再耗十点、三锤交件")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manor_server", type=Path)
     parser.add_argument("river_server", type=Path)
+    parser.add_argument("--tools", type=Path, help="工具损耗复测的停服副本")
     args = parser.parse_args()
     verify_land(args.manor_server)
     verify_river(args.river_server)
+    if args.tools:
+        verify_tools(args.tools)
