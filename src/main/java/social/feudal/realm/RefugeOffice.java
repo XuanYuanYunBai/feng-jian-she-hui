@@ -119,11 +119,26 @@ final class RefugeOffice {
         }
         int nextIndex=Math.min(step+1,path.size()-1);
         Point next=path.get(nextIndex);
-        if(!available(next,nextIndex==path.size()-1)){status(id,"道路中断");return;}
+        boolean nextOpen=available(next,nextIndex==path.size()-1);
         var team=realm.crews.team(home,crew);
+        if(team==null){
+            // The world and the SQLite cursor may have different last save times after power loss.
+            // Locate the original party along its short registered line before attempting to resume.
+            for(var point:path){
+                if(!w.isChunkLoaded(point.x()>>4,point.z()>>4))w.loadChunk(point.x()>>4,point.z()>>4,false);
+            }
+            team=realm.crews.team(home,crew);
+        }
         if(team==null){status(id,"等候队伍所在区块");return;}
+        if(!nextOpen){team.halt();status(id,"道路中断");return;}
         if(!team.near(next.feet(w),.42)){
-            if(team.porter().getLocation().distanceSquared(current.feet(w))>5){team.halt();status(id,"队伍偏离驿道");return;}
+            if(team.porter().getLocation().distanceSquared(current.feet(w))>5){
+                team.halt();
+                for(int i=0;i<path.size();i++)if(team.near(path.get(i).feet(w),.75)){
+                    s.update("UPDATE migration SET step=? WHERE id=?",i,id);return;
+                }
+                status(id,"队伍偏离驿道");return;
+            }
             try{realm.clearance(next,crew,team);}catch(IllegalArgumentException ex){team.halt();status(id,"等候路费");return;}
             team.onRoad(next.feet(w),next.feet(w));status(id,"途中");return;
         }

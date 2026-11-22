@@ -44,6 +44,22 @@ final class FoundingVillages {
         });
     }
 
+    void selectSite(String title,int x,int z)throws SQLException{
+        RealmStore.require(store.number("SELECT count(*) FROM founding_village WHERE title=? AND done=0 AND x IS NULL",title)==1,
+                "请选择已登记且尚未落址的初始聚落");
+        var yard=FirstHolding.yard(x,z);
+        var seat=store.title(title);
+        for(int cx=yard.west()>>4;cx<=yard.east()>>4;cx++)for(int cz=yard.north()>>4;cz<=yard.south()>>4;cz++){
+            RealmStore.require(title.equals(store.owner(cx,cz)),"整个院落须位于指定辖区内");
+            RealmStore.require((cx!=seat.x() || cz!=seat.z()) &&
+                    store.number("SELECT count(*) FROM depot WHERE x=? AND z=?",cx,cz)==0,"请避开治所和税站");
+        }
+        realm.manors.register.available(seat.seal(),yard);
+        var site=survey(x,z);
+        RealmStore.require(site!=null,"请准备一处九格见方的平缓干地，地面和净空须适合搭建民房");
+        store.update("UPDATE founding_village SET x=?,y=?,z=?,candidate=0 WHERE title=?",x,site.floor(),z,title);
+    }
+
     private void advance(){
         try(var q=store.sql("SELECT * FROM founding_village WHERE done=0 AND candidate<256 ORDER BY candidate,title LIMIT 1");
             var row=q.executeQuery()){
@@ -93,17 +109,20 @@ final class FoundingVillages {
     }
 
     private Storehouse.Site findSite(int cx,int cz){
-        var world=realm.world;
         for(int dx:new int[]{8,4,11})for(int dz:new int[]{8,4,11}){
-            int x=cx*16+dx,z=cz*16+dz;
-            int floor=world.getMinHeight();
-            for(int a=-4;a<=4;a++)for(int b=-4;b<=4;b++)
-                floor=Math.max(floor,world.getHighestBlockYAt(x+a,z+b,HeightMap.MOTION_BLOCKING_NO_LEAVES));
-            if(floor+5>=world.getMaxHeight())continue;
-            var site=new Storehouse.Site(x,floor,z);
-            if(usable(site))return site;
+            var site=survey(cx*16+dx,cz*16+dz);
+            if(site!=null)return site;
         }
         return null;
+    }
+    private Storehouse.Site survey(int x,int z){
+        var world=realm.world;
+        int floor=world.getMinHeight();
+        for(int a=-4;a<=4;a++)for(int b=-4;b<=4;b++)
+            floor=Math.max(floor,world.getHighestBlockYAt(x+a,z+b,HeightMap.MOTION_BLOCKING_NO_LEAVES));
+        if(floor+5>=world.getMaxHeight())return null;
+        var site=new Storehouse.Site(x,floor,z);
+        return usable(site)?site:null;
     }
     private void next(String title)throws SQLException{
         store.update("UPDATE founding_village SET candidate=candidate+1,x=NULL,y=NULL,z=NULL WHERE title=?",title);

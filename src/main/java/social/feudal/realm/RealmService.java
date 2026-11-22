@@ -124,7 +124,13 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             switch(action){
                 case "foundingvillages" -> {
                     RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要开服管理权限");
-                    villages.enroll();s.sendMessage("已登记三处初始民房的选址任务。既有聚落和首粮不会重复发放。");
+                    usage(a.length==1 || a.length==4,"foundingvillages [辖区代号 中心X 中心Z]");
+                    if(a.length==4){
+                        villages.selectSite(a[1],Integer.parseInt(a[2]),Integer.parseInt(a[3]));
+                        s.sendMessage("选址已验收，聚落将按登记位置开建。");
+                    }else{
+                        villages.enroll();s.sendMessage("已登记三处初始聚落。需要指定干地时使用 /realm foundingvillages 辖区代号 中心X 中心Z");
+                    }
                 }
                 case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
