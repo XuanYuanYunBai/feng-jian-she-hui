@@ -65,6 +65,20 @@ def compare(db, layers):
     return f"通过 · {len(mapped_land)} 个区块，{len(bridges)} 座桥亭，{len(expected_deeds)} 份待签文书"
 
 
+def check_markets(db, markers):
+    stalls = {row[0]: row[1:] for row in db.execute("""
+            SELECT t.id,t.name,t.x,t.y,t.z,count(b.id) FROM stall t
+            LEFT JOIN bid b ON b.stall=t.id AND b.remaining>0 WHERE t.x IS NOT NULL GROUP BY t.id""")}
+    if set(stalls) != set(markers):
+        raise ValueError("商站地图名册与当前柜台不符")
+    for key, (name, x, y, z, offers) in stalls.items():
+        pin = markers[key]
+        if (html.unescape(pin["label"]) != name or pin["position"] != dict(x=x+.5, y=y+1.5, z=z+.5)
+                or f"在榜收购单　{offers} 份" not in pin["detail"]):
+            raise ValueError("商站位置或买单公示不符 " + key)
+    return f"，{len(stalls)} 座商站"
+
+
 def check_routes(path, layers):
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as freight:
         rows = freight.execute("SELECT name,sx,y,sz,dx,dz,path FROM routes").fetchall()
@@ -106,6 +120,8 @@ if __name__ == "__main__":
                 result = compare(db, markers)
                 if "feudal-network" in markers:
                     result += check_routes(args.database.with_name("freight.sqlite"), markers)
+                if "feudal-markets" in markers:
+                    result += check_markets(db, markers["feudal-markets"]["markers"])
                 print(result)
                 break
             except (ValueError, KeyError, OSError) as error:

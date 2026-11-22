@@ -94,7 +94,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             if(a.length>0)a[0]=action;
             if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
-                s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运");
+                s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
@@ -114,7 +114,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
-                case "stall","market","bidform","bid","sell" -> markets.run(player(s),a);
+                case "prices","quote","pricefilter","stall","market","bidform","bid","sell" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
                 case "estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);

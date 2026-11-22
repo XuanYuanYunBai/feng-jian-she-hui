@@ -47,6 +47,18 @@ final class BlueAtlas implements Runnable {
                 while(r.next())put(hearings,r.getString(1),r.getString(2)+"公示 #"+r.getInt(1),16*r.getInt(3),16*r.getInt(4),16*(r.getInt(5)+1),16*(r.getInt(6)+1),0xb55c37);
             }
             var tolls=bridgeMarkers(s);
+            var markets=new MarkerSet("商站与收购",true,false);
+            try(var q=s.sql("""
+                    SELECT t.id,t.name,t.x,t.y,t.z,count(b.id) FROM stall t
+                    LEFT JOIN bid b ON b.stall=t.id AND b.remaining>0 WHERE t.x IS NOT NULL
+                    GROUP BY t.id""");var r=q.executeQuery()){
+                while(r.next()){
+                    String name=escape(r.getString(2));
+                    markets.put(r.getString(1),POIMarker.builder().label(name)
+                            .detail("<strong>"+name+"</strong><br>在榜收购单　"+r.getInt(6)+" 份<br>游戏内输入 /realm prices 比价")
+                            .position(r.getInt(3)+.5,r.getInt(4)+1.5,r.getInt(5)+.5).defaultIcon().build());
+                }
+            }
             var deeds=new MarkerSet("待签割地文书",true,false);
             try(var q=s.sql("""
                     SELECT c.treaty,t.name,c.donor,c.recipient,c.west,c.north,c.east,c.south
@@ -80,7 +92,7 @@ final class BlueAtlas implements Runnable {
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
                 sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
-                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-ferries",ferries);
+                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-markets",markets);sets.put("feudal-ferries",ferries);
             }
             previous=api;published=realm.mapRevision;
         }catch(SQLException e){realm.plugin.getLogger().log(Level.WARNING,"重建公共疆域图层失败",e);}
