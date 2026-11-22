@@ -226,6 +226,6 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     }
     @Override public void close()throws SQLException{
         if(view!=null && renderer!=null)view.removeRenderer(renderer);
-        travel.close();taxes.saveTime();store.close();
+        mills.baking.close();travel.close();taxes.saveTime();store.close();
     }
 }

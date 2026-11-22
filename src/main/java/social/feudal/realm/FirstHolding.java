@@ -147,7 +147,7 @@ final class FirstHolding implements Listener {
             var b=yard(pos[0],pos[2]);
             body.add(text("厅位　"+pos[0]+"，"+pos[1]+"，"+pos[2]+"\n围界　X "+b.west()+" 至 "+b.east()+"，Z "+b.north()+" 至 "+b.south()+"。"));
             body.add(text("平地示例：外圈 31 段栅栏和 1 扇栅栏门，四角封好。院内放 1 张床，厅位放工作台，紧贴工作台一侧放木桶，存入 4 个面包。"));
-            body.add(text("砍木做围栏和木桶，三块同色羊毛可制床。锄地种麦，12 株成熟小麦可制 4 个面包；另留 3 份小麦给水磨做面包。"));
+            body.add(text("第一批口粮：把磨石立在圆石或石头上，主手拿麦，潜行右键逐份磨粉。主手叠三份粉，在邻水木台阶上分三次右键揉面；把面团放上点燃的营火烤八秒。12 份麦可备齐四个面包。"));
             var draft=new SettlementRegister.Manor("","","",pos[0],pos[1],pos[2],b,1,0,true);
             if(p.getLocation().distanceSquared(new Location(realm.world,pos[0]+.5,pos[1]+.5,pos[2]+.5))<=64){
                 try{realm.manors.inspect(draft);body.add(text("现场查验通过，可以登记首庄。"));buttons.add(command("命名并登记","realm firstname"));}
@@ -173,7 +173,7 @@ final class FirstHolding implements Listener {
             boolean done=store.number("SELECT count(*) FROM farmhand WHERE mill=? AND delivered_flour=1",mill)>0;
             if(done){
                 title="安家手册 · 首批产出已入仓";
-                body.add(text("磨工已把小麦粉送进磨石东侧粮桶。取三份，在工作台的三个格子各放一份，制成一个面包，放回厅旁赈济桶。增床、留粮可在季末迎接下一户；六户并连续赈济一季后可申请建领。"));
+                body.add(text("磨工已把小麦粉送进磨石东侧粮桶。手持三份粉，在邻水木台阶上分三次右键按揉。持面团右键点燃的营火，八秒后拾取面包，放回厅旁赈济桶。增床、留粮可在季末迎接下一户；六户并连续赈济一季后可申请建领。"));
             }else{
                 body.add(text("在东桶放一份小麦，到磨坊十格内派一户磨粉。磨工会把制成的小麦粉放回东桶；缺麦或仓满时查看田务。"));
                 if(store.number("SELECT count(*) FROM farmhand WHERE mill=? AND role='磨粉' AND season=?",mill,realm.manors.register.season())==0)
