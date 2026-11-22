@@ -30,13 +30,26 @@ final class MillOffice implements Listener {
     private final RealmStore s;
     private final FootNavigation navigation;
     private final NamespacedKey loadTarget;
+    private final ItemStack flour;
     MillOffice(RealmService r)throws SQLException{
         realm=r;s=r.store;navigation=new FootNavigation(r.plugin);loadTarget=new NamespacedKey(r.plugin,"field_target");
+        flour=new ItemStack(Material.SUGAR);
+        flour.editMeta(meta->{
+            meta.displayName(Component.text("小麦粉"));
+            meta.getPersistentDataContainer().set(new NamespacedKey(r.plugin,"flour"),PersistentDataType.BYTE,(byte)1);
+        });
+        var loafKey=new NamespacedKey(r.plugin,"milled_bread");
+        var bread=new ShapelessRecipe(loafKey,new ItemStack(Material.BREAD));
+        for(int i=0;i<3;i++)bread.addIngredient(new RecipeChoice.ExactChoice(flour));
+        if(Bukkit.getRecipe(loafKey)!=null)Bukkit.removeRecipe(loafKey);
+        Bukkit.addRecipe(bread);
         s.update("CREATE TABLE IF NOT EXISTS mill(id TEXT PRIMARY KEY,manor TEXT REFERENCES manor(id),x INTEGER,y INTEGER,z INTEGER,tier INTEGER,UNIQUE(x,y,z))");
         s.update("CREATE TABLE IF NOT EXISTS field(x INTEGER,y INTEGER,z INTEGER,mill TEXT REFERENCES mill(id),PRIMARY KEY(x,y,z))");
         s.update("""
             CREATE TABLE IF NOT EXISTS farmhand(id INTEGER PRIMARY KEY,mill TEXT REFERENCES mill(id),season INTEGER,
             role TEXT,quota INTEGER NOT NULL,status TEXT NOT NULL,worker TEXT,UNIQUE(worker))""");
+        if(s.number("SELECT count(*) FROM pragma_table_info('farmhand') WHERE name='delivered_flour'")==0)
+            s.update("ALTER TABLE farmhand ADD COLUMN delivered_flour INTEGER NOT NULL DEFAULT 0");
         Bukkit.getPluginManager().registerEvents(this,r.plugin);
         Bukkit.getScheduler().runTaskTimer(r.plugin,this::tick,20,10);
     }
@@ -129,7 +142,7 @@ final class MillOffice implements Listener {
         body.add(text("田务路程 "+m.radius()+" 格　｜　登记 "+count("SELECT count(*) FROM field WHERE mill=?",m.id())+" / "+m.capacity()+" 格　｜　田工 "+m.workers()+" 席"));
         for(var line:realm.diplomacy.column("SELECT role || ' · ' || status || '　剩余工时 ' || quota FROM farmhand WHERE mill=? AND season=? ORDER BY id",m.id(),realm.manors.register.season()))body.add(text(line));
         show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一户收麦","realm farmjob "+m.id()+" 收麦"),command("派一户补种","realm farmjob "+m.id()+" 补种"),
-                command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor())),2);
+                command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
     }
     private void status(int id,String value)throws SQLException{
         s.update("UPDATE farmhand SET status=? WHERE id=? AND status<>?",value,id,value);
@@ -165,6 +178,8 @@ final class MillOffice implements Listener {
                 var item=cargo.getItem(slot);if(item==null)continue;
                 var left=(item.getType()==Material.WHEAT_SEEDS?seed:grain).addItem(item);
                 cargo.setItem(slot,left.get(0));
+                if(role.equals("磨粉") && item.isSimilar(flour) && left.isEmpty())
+                    s.update("UPDATE farmhand SET delivered_flour=1 WHERE id=? AND delivered_flour=0",id);
                 if(!left.isEmpty()){status(id,"仓满待卸");return;}
             }
             if(finished){npc.remove();status(id,"结工");}return;
@@ -173,9 +188,7 @@ final class MillOffice implements Listener {
             if(!arrive(npc,door(m),id,"前往磨盘"))return;
             var wheat=new ItemStack(Material.WHEAT);
             if(!grain.containsAtLeast(wheat,1)){status(id,"缺制粉谷物");return;}
-            var flour=new ItemStack(Material.SUGAR);var meta=flour.getItemMeta();meta.displayName(Component.text("小麦粉"));
-            meta.getPersistentDataContainer().set(new NamespacedKey(realm.plugin,"flour"),PersistentDataType.BYTE,(byte)1);flour.setItemMeta(meta);
-            grain.removeItem(wheat);cargo.setItem(0,flour);debit(id);return;
+            grain.removeItem(wheat);cargo.setItem(0,flour.clone());debit(id);return;
         }
         if(role.equals("补种") && cargo.getItem(0)==null){
             if(!arrive(npc,door(m),id,"回种柜"))return;

@@ -5,7 +5,7 @@ import java.util.*;
 import static social.feudal.realm.RealmStore.require;
 
 final class SettlementRegister {
-    record Manor(String id,String name,String owner,int x,int y,int z,Charters.Bounds estate,int households,int service){}
+    record Manor(String id,String name,String owner,int x,int y,int z,Charters.Bounds estate,int households,int service,boolean cottage){}
     record Claim(int id,String manor,String title,String type,Charters.Bounds area,String state,int season,long until){}
     final RealmStore s;
     SettlementRegister(RealmStore s)throws SQLException{
@@ -14,6 +14,8 @@ final class SettlementRegister {
             CREATE TABLE IF NOT EXISTS manor(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner TEXT NOT NULL,x INTEGER,y INTEGER,z INTEGER,
             west INTEGER,north INTEGER,east INTEGER,south INTEGER,households INTEGER NOT NULL DEFAULT 3,
             service INTEGER NOT NULL DEFAULT 0,settled INTEGER NOT NULL DEFAULT 0)""");
+        if(s.number("SELECT count(*) FROM pragma_table_info('manor') WHERE name='cottage'")==0)
+            s.update("ALTER TABLE manor ADD COLUMN cottage INTEGER NOT NULL DEFAULT 0");
         s.update("""
             CREATE TABLE IF NOT EXISTS claim(id INTEGER PRIMARY KEY,manor TEXT REFERENCES manor(id),title TEXT NOT NULL,
             type TEXT NOT NULL,west INTEGER,north INTEGER,east INTEGER,south INTEGER,state TEXT NOT NULL,season INTEGER,until INTEGER)""");
@@ -27,25 +29,57 @@ final class SettlementRegister {
     Manor manor(String id)throws SQLException{
         try(var q=s.sql("SELECT * FROM manor WHERE id=?",id);var r=q.executeQuery()){
             require(r.next(),"未知庄园");return new Manor(id,r.getString("name"),r.getString("owner"),r.getInt("x"),r.getInt("y"),r.getInt("z"),
-                    new Charters.Bounds(r.getInt("west"),r.getInt("north"),r.getInt("east"),r.getInt("south")),r.getInt("households"),r.getInt("service"));
+                    new Charters.Bounds(r.getInt("west"),r.getInt("north"),r.getInt("east"),r.getInt("south")),r.getInt("households"),r.getInt("service"),r.getBoolean("cottage"));
         }
     }
     void estate(String id,String name,String actor,int x,int y,int z,Charters.Bounds b)throws SQLException{
-        Politics.id(id);Politics.wording(name,30);
-        require(b.contains(x,z) && b.east()-b.west()>=7 && b.south()-b.north()>=7 && b.east()-b.west()<96 && b.south()-b.north()<96,"庄宅须在 8–96 格长宽的围界内");
+        estate(new Manor(id,name,actor,x,y,z,b,3,0,false));
+    }
+    void available(String actor,Charters.Bounds b)throws SQLException{
+        require(s.number("SELECT count(*) FROM manor WHERE west<=? AND east>=? AND north<=? AND south>=?",b.east(),b.west(),b.south(),b.north())==0,"与已有庄园重叠");
+        for(int cx=b.west()>>4;cx<=b.east()>>4;cx++)for(int cz=b.north()>>4;cz<=b.south()>>4;cz++){
+            String owner=s.owner(cx,cz);require(owner==null || s.title(owner).seal().equals(actor),"建庄涉及他领，请先取得土地");
+        }
+    }
+    // Search cadastral records only. Looking up a site must never generate or load terrain.
+    enum Ground { DRY, UNSEEN, UNSUITABLE }
+    int[] nearestYard(String actor,int x,int z,double west,double north,double east,double south,
+                      java.util.function.BiFunction<Integer,Integer,Ground> ground)throws SQLException{
+        try(var q=s.sql("""
+            WITH RECURSIVE offsets(n) AS (VALUES(-16) UNION ALL SELECT n+1 FROM offsets WHERE n<16),
+            sites AS (SELECT ((?+a.n)*16+8) AS x,((?+b.n)*16+8) AS z FROM offsets a CROSS JOIN offsets b)
+            SELECT x,z FROM sites p WHERE x-4>=? AND z-4>=? AND x+5<=? AND z+5<=?
+            AND NOT EXISTS(SELECT 1 FROM land l JOIN title t ON t.id=l.title
+                           WHERE l.x=(p.x>>4) AND l.z=(p.z>>4) AND t.seal<>?)
+            AND NOT EXISTS(SELECT 1 FROM manor m WHERE m.west<=p.x+4 AND m.east>=p.x-4 AND m.north<=p.z+4 AND m.south>=p.z-4)
+            ORDER BY (x-?)*(x-?)+(z-?)*(z-?),x,z""",x>>4,z>>4,west,north,east,south,actor,x,x,z,z);
+            var row=q.executeQuery()){
+            int[] unexplored=null;
+            while(row.next()){
+                int px=row.getInt(1),pz=row.getInt(2);
+                var surface=ground.apply(px,pz);
+                if(surface==Ground.DRY)return new int[]{px,pz};
+                if(surface==Ground.UNSEEN && unexplored==null)unexplored=new int[]{px,pz};
+            }
+            return unexplored;
+        }
+    }
+    void estate(Manor m)throws SQLException{
+        String id=m.id(), actor=m.owner();
+        var b=m.estate();
+        Politics.id(id);Politics.wording(m.name(),30);
+        require(b.contains(m.x(),m.z()) && b.east()-b.west()>=7 && b.south()-b.north()>=7 && b.east()-b.west()<96 && b.south()-b.north()<96,"庄宅须在 8–96 格长宽的围界内");
         s.atomic(()->{
             require(s.value("SELECT id FROM manor WHERE id=? UNION SELECT id FROM title WHERE id=?",id,id)==null,"庄园代号已用");
-            require(s.number("SELECT count(*) FROM manor WHERE west<=? AND east>=? AND north<=? AND south>=?",b.east(),b.west(),b.south(),b.north())==0,"与已有庄园重叠");
-            for(int cx=b.west()>>4;cx<=b.east()>>4;cx++)for(int cz=b.north()>>4;cz<=b.south()>>4;cz++){
-                String owner=s.owner(cx,cz);require(owner==null || s.title(owner).seal().equals(actor),"建庄涉及他领，请先取得土地");
-            }
+            available(actor,b);
             if(s.number("SELECT count(*) FROM manor WHERE owner=?",actor)>0){
+                require(!m.cottage(),"一户起家只适用于首庄");
                 String source=s.value("SELECT id FROM manor WHERE owner=? AND households>=4 ORDER BY households DESC,id LIMIT 1",actor);
                 require(source!=null,"另立庄园需要从已有庄园派出三户，原庄至少留一户");
                 s.update("UPDATE manor SET households=households-3 WHERE id=?",source);
             }
-            s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    id,name,actor,x,y,z,b.west(),b.north(),b.east(),b.south());return null;
+            s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,households,cottage) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),m.cottage()?1:3,m.cottage()?1:0);return null;
         });
     }
     int season()throws SQLException{return s.number("SELECT v FROM setting WHERE k='season'");}

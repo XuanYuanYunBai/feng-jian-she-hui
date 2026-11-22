@@ -27,6 +27,7 @@ final class RealmDialogs {
         for (var t : titles.subList((page-1)*PAGE_SIZE, Math.min(titles.size(), page*PAGE_SIZE)))
             buttons.add(command(t.name(), "realm brief " + t.id()));
         navigation(buttons, "realm atlas ", page, count);
+        buttons.add(command("安家手册","realm start"));
         buttons.add(command("各地行情","realm prices"));
         buttons.add(command("行旅与货运","realm travel"));
         buttons.add(command("国家疆域", "realm map country"));

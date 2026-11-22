@@ -23,6 +23,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final Contributions contributions;
     final ManorOffice manors;
     final MillOffice mills;
+    final FirstHolding firstHolding;
     final CrossingOffice crossings;
     public final social.feudal.transport.HaulNetwork roads;
     public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
@@ -55,6 +56,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
+        firstHolding=new FirstHolding(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
@@ -90,11 +92,15 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     void inWorld(Player p){RealmStore.require(p.getWorld().equals(world),"请前往登记的主世界");}
     @Override public boolean onCommand(CommandSender s,Command command,String label,String[] a){
         try {
-            String action=a.length==0 && s instanceof Player && store.ready()?"atlas":a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
+            String action=a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
+            if(a.length==0 && s instanceof Player p) action=!store.ready() || firstHolding.newcomer(p)?"start":"atlas";
             if(a.length>0)a[0]=action;
+            if(Set.of("start","seekland","clearhome","stakehome","firstname","firstdeed","firstmill").contains(action)){
+                firstHolding.run(player(s),a);return true;
+            }
             if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
-                s.sendMessage("/realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
+                s.sendMessage("/realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");

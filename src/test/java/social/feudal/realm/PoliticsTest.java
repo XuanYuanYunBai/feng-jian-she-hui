@@ -53,6 +53,29 @@ class PoliticsTest {
             assertEquals("生效",s.value("SELECT state FROM treaty WHERE id='river'"));
         }
     }
+    @Test void homesteadSearchAndRegistrationRespectLandAndHouseholds()throws Exception{
+        try(var s=open("first-holding")){
+            var r=new SettlementRegister(s);
+            assertNull(r.nearestYard(ALICE,0,0,-16,-16,16,16,(x,z)->SettlementRegister.Ground.DRY));
+            int[] site=r.nearestYard(ALICE,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.DRY);
+            assertNotNull(site);
+            assertNull(r.nearestYard(ALICE,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.UNSUITABLE));
+            assertArrayEquals(site,r.nearestYard(ALICE,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.UNSEEN));
+            var yard=FirstHolding.yard(site[0],site[1]);
+            r.available(ALICE,yard);
+            var cottage=new SettlementRegister.Manor("brook","溪庄",ALICE,site[0],64,site[1],yard,1,0,true);
+            r.estate(cottage);
+            assertEquals(1,r.manor("brook").households());
+            assertTrue(r.manor("brook").cottage());
+            assertFalse(java.util.Arrays.equals(site,r.nearestYard(BOB,-4,-4,-500,-500,500,500,(x,z)->SettlementRegister.Ground.DRY)));
+            assertThrows(IllegalArgumentException.class,()->r.available(BOB,yard));
+            var next=FirstHolding.yard(-404,-404);
+            assertThrows(IllegalArgumentException.class,()->r.estate(new SettlementRegister.Manor("again","新庄",ALICE,-404,64,-404,next,1,0,true)));
+            assertThrows(IllegalArgumentException.class,()->r.estate("ordinary","分庄",ALICE,-404,64,-404,next));
+            assertEquals(1,r.manor("brook").households());
+            assertNull(s.owner(site[0]>>4,site[1]>>4));
+        }
+    }
     @Test void landRequiresPublicNoticeServiceAndActualGrantOfPeerage()throws Exception{
         try(var s=open("settle")){
             var r=new SettlementRegister(s);var b=new Charters.Bounds(480,480,495,495);var chunks=new Charters.Bounds(30,30,31,30);

@@ -71,7 +71,7 @@ final class ManorOffice implements Listener {
     private static boolean stocked(Inventory inv,int households){return inv.containsAtLeast(new ItemStack(Material.BREAD),households+3);}
     private Inventory foodStore(SettlementRegister.Manor m){
         var hall=realm.world.getBlockAt(m.x(),m.y(),m.z());
-        if(hall.getType()!=Material.LECTERN)return null;
+        if(hall.getType()!=Material.LECTERN && !(m.cottage() && hall.getType()==Material.CRAFTING_TABLE))return null;
         for(var face:List.of(BlockFace.NORTH,BlockFace.EAST,BlockFace.SOUTH,BlockFace.WEST)){
             var bin=hall.getRelative(face);
             if(m.estate().contains(bin.getX(),bin.getZ()) && bin.getType()==Material.BARREL && bin.getState(false) instanceof Container c)return c.getInventory();
@@ -94,12 +94,14 @@ final class ManorOffice implements Listener {
             if(Tag.FENCES.isTagged(mat)||Tag.FENCE_GATES.isTagged(mat)||Tag.WALLS.isTagged(mat)||Tag.LEAVES.isTagged(mat)||mat==Material.WATER)return true;
         }return false;
     }
-    private void inspect(SettlementRegister.Manor m){
+    void inspect(SettlementRegister.Manor m){
         var b=m.estate();
         require(b.east()>=b.west() && b.south()>=b.north() && (long)b.east()-b.west()<96 && (long)b.south()-b.north()<96
                 && b.contains(m.x(),m.z()),"请在厅内登记不超过 96 格长宽的庄园");
         require(loaded(b),"请走近庄园，待围界区块加载");
-        require(foodStore(m)!=null && stocked(foodStore(m),m.households()),"厅内讲台旁须设赈济木桶，内备每户一份面包及三份公共余粮");
+        Inventory food=foodStore(m);
+        require(food!=null,"在登记的厅位放"+(m.cottage()?"工作台或讲台":"讲台")+"，紧贴其水平一侧放赈济木桶");
+        require(stocked(food,m.households()),"赈济桶须存 "+(m.households()+3)+" 个面包（每户一份及三份公粮）");
         boolean gate=false;
         for(int x=b.west();x<=b.east();x++)for(int z=b.north();z<=b.south();z++){
             if(x!=b.west() && x!=b.east() && z!=b.north() && z!=b.south())continue;
@@ -119,7 +121,7 @@ final class ManorOffice implements Listener {
         var m=register.manor(id);var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
         body.add(text("业主　"+realm.display(m.owner())+"　｜　在住 "+m.households()+" 户"));
         body.add(text("厅堂　"+m.x()+"，"+m.y()+"，"+m.z()+"　｜　完成赈济 "+m.service()+" 季"));
-        body.add(text("讲台旁木桶每季供给每户一份面包，并留三份赈济。增设床位和供粮可接纳迁户。"));
+        body.add(text("厅旁木桶每季供给每户一份面包，并留三份赈济。增设床位和供粮可接纳迁户。"));
         String nation=s.value("SELECT nation FROM capital WHERE manor=?",id);
         if(nation!=null)body.add(text("首都　"+s.title(nation).name()));
         for(String mill:realm.diplomacy.column("SELECT id FROM mill WHERE manor=?",id))buttons.add(command("水磨 · "+mill,"realm mill "+mill));
@@ -140,7 +142,7 @@ final class ManorOffice implements Listener {
     @EventHandler(ignoreCancelled=true) public void use(PlayerInteractEvent e)throws SQLException{
         if(e.getHand()!=EquipmentSlot.HAND || e.getAction()!=Action.RIGHT_CLICK_BLOCK || e.getClickedBlock()==null)return;
         var b=e.getClickedBlock();
-        if(b.getType()!=Material.LECTERN || b.getWorld()!=realm.world)return;
+        if(b.getWorld()!=realm.world || (b.getType()!=Material.LECTERN && !(b.getType()==Material.CRAFTING_TABLE && e.getPlayer().isSneaking())))return;
         String id=s.value("SELECT id FROM manor WHERE x=? AND y=? AND z=?",b.getX(),b.getY(),b.getZ());
         if(id!=null){e.setCancelled(true);archive(e.getPlayer(),id);}
     }
@@ -156,8 +158,8 @@ final class ManorOffice implements Listener {
             case "settle" -> {
                 usage(a.length==7,"settle 代号 名称 西 北 东 南（方块）");
                 var block=p.getTargetBlockExact(6);require(block!=null && block.getType()==Material.LECTERN,"请瞄准庄宅讲台");
-                var m=new SettlementRegister.Manor(a[1],a[2],actor,block.getX(),block.getY(),block.getZ(),bounds(a,3),3,0);
-                inspect(m);register.estate(m.id(),m.name(),actor,m.x(),m.y(),m.z(),m.estate());realm.changed();archive(p,m.id());
+                var m=new SettlementRegister.Manor(a[1],a[2],actor,block.getX(),block.getY(),block.getZ(),bounds(a,3),3,0,false);
+                inspect(m);register.estate(m);realm.changed();archive(p,m.id());
             }
             case "manor" -> {usage(a.length==2,"manor 庄园");archive(p,a[1]);}
             case "surveyclaim" -> {
