@@ -8,6 +8,7 @@ import static social.feudal.realm.RealmStore.require;
 final class BorderCourt {
     static final long DAY=86400, WINDOW=5400;
     final RealmStore s;
+    final BridgePrivileges privileges;
     BorderCourt(RealmStore s)throws SQLException{
         this.s=s;
         s.update("""
@@ -25,6 +26,7 @@ final class BorderCourt {
         if(s.number("SELECT count(*) FROM pragma_table_info('feud') WHERE name='slot'")==0)s.update("ALTER TABLE feud ADD COLUMN slot INTEGER NOT NULL DEFAULT 0");
         if(s.number("SELECT count(*) FROM pragma_table_info('feud') WHERE name='opened'")==0)s.update("ALTER TABLE feud ADD COLUMN opened INTEGER NOT NULL DEFAULT 0");
         s.update("CREATE TABLE IF NOT EXISTS passage(id INTEGER PRIMARY KEY,bridge TEXT,owner TEXT,payer TEXT,paid INTEGER,at INTEGER)");
+        privileges = new BridgePrivileges(s);
     }
     void bridge(String actor,String id,String name,String nation,int x,int y,int z,int fee)throws SQLException{
         Politics.id(id);Politics.wording(name,30);s.politics.represents(nation,actor);
@@ -68,23 +70,23 @@ final class BorderCourt {
             ((reversed=0 AND attacker=?) OR (reversed=1 AND defender=?))""",n,country,country)==1,"仅当前有未决诉求的一方可撤回");
     }
     /** Count at most one observed second per tick. An unloaded or offline period cannot grant any control. */
-    void observe(int id,long now,boolean available,boolean attack,boolean defend)throws SQLException{
-        s.atomic(()->{
+    boolean observe(int id,long now,boolean available,boolean attack,boolean defend)throws SQLException{
+        return s.atomic(()->{
             try(var q=s.sql("SELECT * FROM feud WHERE id=? AND state NOT IN ('结案','和解')",id);var r=q.executeQuery()){
-                if(!r.next())return null;
+                if(!r.next())return false;
                 long start=r.getLong("start"),last=r.getLong("last");int progress=r.getInt("progress");boolean reverse=r.getBoolean("reversed");
-                if(now<=last)return null;
+                if(now<=last)return false;
                 int slot=r.getInt("slot");long windowStart=start+slot*DAY;
-                if(now<windowStart)return null;
+                if(now<windowStart)return false;
                 if(now>=windowStart+WINDOW){
                     if(!r.getBoolean("opened")){
                         long days=1+Math.floorDiv(now-windowStart-WINDOW,DAY);
                         s.update("UPDATE feud SET start=start+?,last=?,state='顺延待开场' WHERE id=?",days*DAY,now,id);
                     }else if(slot==2)s.update("UPDATE feud SET state='结案',last=? WHERE id=?",now,id);
                     else s.update("UPDATE feud SET slot=slot+1,opened=0,state='待开场',last=? WHERE id=?",now,id);
-                    return null;
+                    return false;
                 }
-                if(!available)return null;
+                if(!available)return false;
                 if(!r.getBoolean("opened"))s.update("UPDATE feud SET opened=1 WHERE id=?",id);
                 boolean claimant=reverse?defend:attack,holder=reverse?attack:defend;
                 if(claimant && !holder)progress++;
@@ -94,8 +96,9 @@ final class BorderCourt {
                     s.update("UPDATE crossing SET owner=? WHERE id=?",winner,bridge);
                     s.update("UPDATE feud SET last=?,progress=0,reversed=1,state=? WHERE id=?",now,reverse?"结案":"反向诉求",id);
                     s.politics.log(null,winner,"桥税争议 #"+id+" 已兑现，后续车次依新权源收费");
+                    return true;
                 }else s.update("UPDATE feud SET last=?,progress=?,state=? WHERE id=?",now,progress,reverse?"反向诉求":"争夺中",id);
-            }return null;
+            }return false;
         });
     }
 }

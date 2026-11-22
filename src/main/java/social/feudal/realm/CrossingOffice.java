@@ -64,7 +64,7 @@ final class CrossingOffice implements Listener {
                         attack|="原告".equals(side);defend|="守方".equals(side);
                     }
                 }
-                court.observe(a[0],now,active,attack,defend);
+                if(court.observe(a[0],now,active,attack,defend))realm.changed();
             }
         }catch(SQLException e){realm.plugin.getLogger().log(Level.WARNING,"桥亭战事结算失败",e);}
     }
@@ -88,17 +88,36 @@ final class CrossingOffice implements Listener {
         body.add(text("在亭西的木桶首格放入本次路费，现场核账。过往收据按当时权利人留档。"));
         var buttons=new ArrayList<io.papermc.paper.registry.data.dialog.ActionButton>();
         buttons.add(command("确认本次路费","realm toll "+id));
+        String actor=p.getUniqueId().toString();
+        var title=s.title(owner);
+        if(actor.equals(title.lawful()) && actor.equals(title.seal()))
+            buttons.add(command("颁发定次免税特许","realm tollform "+id));
+        try(var query=s.sql("""
+                SELECT g.id,t.name,t.lawful,t.seal,g.remaining FROM bridge_privilege g
+                JOIN title t ON t.id=g.holder WHERE g.bridge=? AND g.remaining>0 ORDER BY g.id""",id);
+                var rows=query.executeQuery()){
+            while(rows.next()){
+                body.add(text(rows.getString(2)+"　免税余 "+rows.getInt(5)+" 次"));
+                if(actor.equals(rows.getString(3)) && actor.equals(rows.getString(4)))
+                    buttons.add(command("代表"+rows.getString(2)+"免税通行","realm passage "+id+" "+rows.getInt(1)));
+            }
+        }
         for(String n:realm.diplomacy.column("SELECT id FROM feud WHERE bridge=? ORDER BY id DESC LIMIT 6",id))
             buttons.add(command("争议 #"+n,"realm conflict "+n));
         show(p,s.value("SELECT name FROM crossing WHERE id=?",id),body,List.of(),buttons,2);
     }
+    private Block counter(Player p,String id)throws SQLException{
+        var block=post(id);
+        require(p.getLocation().distanceSquared(block.getLocation())<=36 && open(block),"请到可通行的桥亭六格内");
+        return block;
+    }
     private void pay(Player p,String id)throws SQLException{
-        var block=post(id);require(p.getLocation().distanceSquared(block.getLocation())<=36 && open(block),"请到可通行的桥亭六格内");
+        var block=counter(p,id);
         String owner=s.value("SELECT owner FROM crossing WHERE id=?",id),actor=p.getUniqueId().toString();
         int fee=s.number("SELECT fee FROM crossing WHERE id=?",id);long now=Instant.now().getEpochSecond();
         var barrel=(Barrel)block.getRelative(BlockFace.WEST).getState();
         var receipt=new NamespacedKey(realm.plugin,"toll_receipt");recover(id,barrel,receipt);
-        require(s.value("SELECT id FROM passage WHERE bridge=? AND payer=? AND at>?",id,actor,now-10)==null,"已签发此次通行回执");
+        court.privileges.checkPassage(id,actor,now);
         var inv=barrel.getSnapshotInventory();var item=inv.getItem(0);var coin=new ItemStack(Material.GOLD_NUGGET);
         require(item!=null && item.isSimilar(coin) && item.getAmount()>=fee,"请将实物金粒放入西侧柜桶首格");
         int destination=-1;
@@ -144,7 +163,30 @@ final class CrossingOffice implements Listener {
             case "bridge" -> {
                 usage(a.length==5,"bridge 桥亭ID 桥名 国家 每次金粒");var b=p.getTargetBlockExact(6);
                 require(b!=null && open(b),"请瞄准讲台，西侧设收费桶，东侧留三格宽七格长的通道");
-                court.bridge(actor,a[1],a[2],a[3],b.getX(),b.getY(),b.getZ(),Integer.parseInt(a[4]));archive(p,a[1]);
+                court.bridge(actor,a[1],a[2],a[3],b.getX(),b.getY(),b.getZ(),Integer.parseInt(a[4]));realm.changed();archive(p,a[1]);
+            }
+            case "tollform" -> {
+                usage(a.length==2 || a.length==3,"tollform 桥亭 [受许国]");counter(p,a[1]);
+                String owner=s.value("SELECT owner FROM crossing WHERE id=?",a[1]);
+                s.politics.represents(owner,actor);
+                if(a.length==2){
+                    var buttons=new ArrayList<io.papermc.paper.registry.data.dialog.ActionButton>();
+                    for(String nation:realm.diplomacy.column("SELECT id FROM nation WHERE id<>? ORDER BY id",owner))
+                        buttons.add(command(s.title(nation).name(),"realm tollform "+a[1]+" "+nation));
+                    show(p,"选择享有通行权的国家",List.of(text("特许绑定本桥，收费权易手后继续有效。")),List.of(),buttons,2);
+                }else DiplomacyDesk.form(p,"给"+s.title(a[2]).name()+"颁发免税特许","该国持印人每次在桥亭核销一次。可授 1–64 次，用尽后可续授。",
+                        "realm tollgrant "+a[1]+" "+a[2],List.of(new DiplomacyDesk.Field("uses","可免次数","4",2)));
+            }
+            case "tollgrant" -> {
+                usage(a.length==4,"tollgrant 桥亭 受许国 次数");counter(p,a[1]);
+                court.privileges.grant(actor,a[1],a[2],Integer.parseInt(a[3]));realm.changed();archive(p,a[1]);
+            }
+            case "passage" -> {
+                usage(a.length==3,"passage 桥亭 特许号");var block=counter(p,a[1]);
+                var bin=(Barrel)block.getRelative(BlockFace.WEST).getState();
+                recover(a[1],bin,new NamespacedKey(realm.plugin,"toll_receipt"));
+                int left=court.privileges.redeem(actor,a[1],Integer.parseInt(a[2]),Instant.now().getEpochSecond());
+                realm.changed();p.sendMessage("已登记免税通行，特许余 "+left+" 次");archive(p,a[1]);
             }
             case "toll" -> {usage(a.length==2,"toll 桥亭");pay(p,a[1]);}
             case "notice" -> {

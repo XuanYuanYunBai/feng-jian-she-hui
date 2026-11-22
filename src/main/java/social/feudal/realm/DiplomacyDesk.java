@@ -179,10 +179,10 @@ final class DiplomacyDesk {
                 usage(a.length>=9,"cede 让方 受方 文号 西 北 东 南 条约名称");
                 var b=new Charters.Bounds(Integer.parseInt(a[4]),Integer.parseInt(a[5]),Integer.parseInt(a[6]),Integer.parseInt(a[7]));
                 law.cessions.draft(a[3],a[1],a[2],actor,b,String.join(" ",Arrays.copyOfRange(a,8,a.length)));
-                document(p,a[3]);
+                realm.changed();document(p,a[3]);
             }
             case "cancelcede" -> {
-                usage(a.length==3,"cancelcede 文号 本国");law.cessions.cancel(a[1],a[2],actor);document(p,a[1]);
+                usage(a.length==3,"cancelcede 文号 本国");law.cessions.cancel(a[1],a[2],actor);realm.changed();document(p,a[1]);
             }
             case "compose" -> {usage(a.length==2,"compose 本国");law.represents(a[1],actor);
                 form(p,"起草多边文书","本国先签，最后一国批准时创始签署人须在场。国家代号可在各领档案查询。",

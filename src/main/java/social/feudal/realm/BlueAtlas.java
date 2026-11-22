@@ -46,12 +46,56 @@ final class BlueAtlas implements Runnable {
             try(var q=s.sql("SELECT id,type,west,north,east,south FROM claim WHERE state='公示中'");var r=q.executeQuery()){
                 while(r.next())put(hearings,r.getString(1),r.getString(2)+"公示 #"+r.getInt(1),16*r.getInt(3),16*r.getInt(4),16*(r.getInt(5)+1),16*(r.getInt(6)+1),0xb55c37);
             }
+            var tolls=bridgeMarkers(s);
+            var deeds=new MarkerSet("待签割地文书",true,false);
+            try(var q=s.sql("""
+                    SELECT c.treaty,t.name,c.donor,c.recipient,c.west,c.north,c.east,c.south
+                    FROM land_cession c JOIN treaty t ON t.id=c.treaty WHERE t.state='待批准'""");
+                    var r=q.executeQuery()){
+                while(r.next()){
+                    String label=escape(r.getString(2)+" · "+names.get(r.getString(3))+" → "+names.get(r.getString(4))+"（待签）");
+                    var box=Shape.createRect(r.getInt(5)*16,r.getInt(6)*16,(r.getInt(7)+1)*16,(r.getInt(8)+1)*16);
+                    deeds.put(r.getString(1),ShapeMarker.builder().label(label).shape(box,65).centerPosition()
+                            .depthTestEnabled(false).lineWidth(3).lineColor(new Color(0xe9ab38,.95f))
+                            .fillColor(new Color(0xe9ab38,.24f)).build());
+                }
+            }
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
                 sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
+                sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);
             }
             previous=api;published=realm.mapRevision;
         }catch(SQLException e){realm.plugin.getLogger().log(Level.WARNING,"重建公共疆域图层失败",e);}
+    }
+    private static MarkerSet bridgeMarkers(RealmStore s)throws SQLException{
+        var bridges=new MarkerSet("桥亭与通行特许",true,false);
+        var privileges=new HashMap<String,List<String>>();
+        try(var q=s.sql("""
+                SELECT g.bridge,t.name,g.remaining FROM bridge_privilege g JOIN title t ON t.id=g.holder
+                WHERE g.remaining>0 ORDER BY g.bridge,g.id""");var r=q.executeQuery()){
+            while(r.next())privileges.computeIfAbsent(r.getString(1),unused->new ArrayList<>())
+                    .add(escape(r.getString(2))+"　余 "+r.getInt(3)+" 次");
+        }
+        try(var q=s.sql("""
+                SELECT c.id,c.name,t.name,c.fee,c.x,c.y,c.z FROM crossing c JOIN title t ON t.id=c.owner""");
+                var r=q.executeQuery()){
+            while(r.next()){
+                String id=r.getString(1),name=escape(r.getString(2));
+                var lines=new ArrayList<String>();
+                lines.add("<strong>"+name+"</strong>");
+                lines.add("收费权　"+escape(r.getString(3)));
+                lines.add("每次 "+r.getInt(4)+" 金粒");
+                var grants=privileges.getOrDefault(id,List.of());
+                lines.add(grants.isEmpty()?"当前无免税特许":"免税特许");
+                lines.addAll(grants);
+                String detail="<div style='min-width:12em;max-width:22em;width:max-content'>"
+                        +String.join("<br>",lines)+"</div>";
+                bridges.put(id,POIMarker.builder().label(name).detail(detail)
+                        .position(r.getInt(5)+.5,r.getInt(6)+1.5,r.getInt(7)+.5).defaultIcon().build());
+            }
+        }
+        return bridges;
     }
     private static void span(MarkerSet countries,MarkerSet empire,String id,String name,boolean inside,int west,int east,int z){
         String key=west+"_"+z;int x1=west*16,x2=(east+1)*16,z1=z*16,z2=z1+16;
@@ -59,8 +103,11 @@ final class BlueAtlas implements Runnable {
         if(inside)put(empire,key,"河湾帝国 · "+name,x1,z1,x2,z2,0x8661a9);
     }
     private static void put(MarkerSet set,String id,String name,int west,int north,int east,int south,int rgb){
-        String safe=name.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");
+        String safe=escape(name);
         set.put(id,ShapeMarker.builder().label(safe).shape(Shape.createRect(west,north,east,south),64).centerPosition()
                 .depthTestEnabled(false).lineWidth(0).fillColor(new Color(rgb,.42f)).build());
+    }
+    private static String escape(String name){
+        return name.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");
     }
 }

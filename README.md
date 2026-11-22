@@ -2,9 +2,9 @@
 
 项目名称取自马克·布洛赫（Marc Bloch）的同名著作《封建社会》（La Société féodale）。这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[战略玩法设计与下一轮验收](docs/slg-design.md)
 
-当前可玩版本 **《封建社会》0.5.1** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，玩家使用 `/realm` 打开中文图册。
+当前可玩版本 **《封建社会》0.5.2** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，玩家使用 `/realm` 打开中文图册。
 
-[下载插件](examples/imperial-atlas/feudal-survey-0.5.1.jar) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
+[下载插件](examples/imperial-atlas/feudal-survey-0.5.2.jar) · [桥亭特许、BlueMap 安装与实机截图](docs/paper-0.5.2-bluemap.md) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
 
 项目人物使用 Minecraft 原版人形实体 `Mannequin`。首次加入服务器时，接受“封建社会”的资源包即可看到四套原创像素皮肤。税仓、公共货线及封臣驻地各有对应的衣着。右键驻地执事或教士可查当地领地与税权。[人物皮肤源图](assets/npc) · [资源包](examples/imperial-atlas/feudal-people-v1.zip)
 
