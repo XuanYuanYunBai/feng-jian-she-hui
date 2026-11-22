@@ -58,7 +58,7 @@ final class FirstHolding implements Listener {
 
     static Charters.Bounds yard(int x,int z) { return new Charters.Bounds(x-4,z-4,x+4,z+4); }
 
-    private void border(Charters.Bounds b) {
+    void border(Charters.Bounds b) {
         var border=realm.world.getWorldBorder();
         require(border.isInside(new Location(realm.world,b.west()+.5,0,b.north()+.5)) &&
                 border.isInside(new Location(realm.world,b.east()+.5,0,b.south()+.5)),"这块院地超出了世界边界");
@@ -130,7 +130,7 @@ final class FirstHolding implements Listener {
         guide(p);
     }
 
-    private void guide(Player p){
+    private void guide(Player p)throws SQLException{
         var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();var pos=site(p);
         String title;
         if(pos==null || pos.length==2){
@@ -156,7 +156,7 @@ final class FirstHolding implements Listener {
             buttons.add(command("重新查验","realm start"));buttons.add(command("改在脚下定址","realm stakehome"));
         }
         if(pos!=null)buttons.add(command("清除选址","realm clearhome"));
-        buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 
@@ -173,7 +173,7 @@ final class FirstHolding implements Listener {
             boolean done=store.number("SELECT count(*) FROM farmhand WHERE mill=? AND delivered_flour=1",mill)>0;
             if(done){
                 title="安家手册 · 首批产出已入仓";
-                body.add(text("磨工已把小麦粉送进磨石东侧粮桶。手持三份粉，在邻水木台阶上分三次右键按揉。持面团右键点燃的营火，八秒后拾取面包，放回厅旁赈济桶。增建民房、足额供粮可自然增长；600 人并连续赈济一季后可申请建领。"));
+                body.add(text("磨工已把小麦粉送进磨石东侧粮桶。手持三份粉，在邻水木台阶上分三次右键按揉。持面团右键点燃的营火，八秒后拾取面包，放回厅旁赈济桶。增建民房、足额供粮可自然增长；200 人并连续赈济一季后可申请建领。"));
             }else{
                 body.add(text("在东桶放一份小麦，到磨坊十格内派一班磨粉。磨工会把制成的小麦粉放回东桶；缺麦或仓满时查看田务。"));
                 if(store.number("SELECT count(*) FROM farmhand WHERE mill=? AND role='磨粉' AND season=?",mill,realm.manors.register.season())==0)
@@ -182,7 +182,7 @@ final class FirstHolding implements Listener {
             }
             buttons.add(command("水磨田务","realm mill "+mill));
         }
-        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 }

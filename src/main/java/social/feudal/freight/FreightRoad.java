@@ -103,6 +103,8 @@ final class FreightRoad {
 
     static String goodsName(String material) {
         return switch (material) {
+            case "BREAD" -> "面包";
+            case "IRON_INGOT" -> "铁锭";
             case "WHEAT" -> "小麦";
             case "WHITE_WOOL" -> "白色羊毛";
             case "OAK_LOG" -> "橡木原木";
@@ -120,7 +122,7 @@ final class FreightRoad {
         inspect(r,0);inspect(r,r.length());
         var b = barrel(r.sx(), r.y(), r.sz(), r.sourceSeal());
         ItemStack stack = b.getSnapshotInventory().getItem(0);
-        if (stack == null || !Set.of(Material.WHEAT, Material.WHITE_WOOL, Material.OAK_LOG).contains(stack.getType())
+        if (stack == null || !Set.of(Material.WHEAT, Material.WHITE_WOOL, Material.OAK_LOG, Material.BREAD, Material.IRON_INGOT).contains(stack.getType())
                 || stack.getAmount() < 1 || stack.getAmount() > 64)
             throw new IllegalArgumentException("请将 1–64 件小麦、白色羊毛或橡木原木放入起点桶第一格");
         Team team=team(r);

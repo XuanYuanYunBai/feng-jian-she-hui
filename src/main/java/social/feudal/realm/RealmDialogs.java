@@ -28,7 +28,7 @@ final class RealmDialogs {
             buttons.add(command(t.name(), "realm brief " + t.id()));
         navigation(buttons, "realm atlas ", page, count);
         buttons.add(command("各国人口簿","realm census"));
-        buttons.add(command("安家手册","realm start"));
+        buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("安家手册","realm start"));
         buttons.add(command("各地行情","realm prices"));
         buttons.add(command("行旅与货运","realm travel"));
         buttons.add(command("国家疆域", "realm map country"));
@@ -51,6 +51,7 @@ final class RealmDialogs {
                 text("驻地区块　" + t.x() + "，" + t.z() + "　｜　直辖 " + s.number("SELECT count(*) FROM land WHERE title=?",t.id()) + " 区块"),
                 text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + (p.getUniqueId().toString().equals(t.seal())?realm.taxes.balance(t):"仅持印人可查"))));
         var buttons=new ArrayList<ActionButton>();
+        buttons.add(command("领地人口与领印","realm territory "+t.id()));
         for(var region:realm.manors.register.census())if(region.id().equals(t.id())){
             buttons.add(command("辖内聚落","realm people "+t.id()));
             body.add(text("居民 "+region.population()+" 人　｜　直辖 "+region.direct()+" 人　｜　封臣辖下 "+(region.population()-region.direct())+" 人"));

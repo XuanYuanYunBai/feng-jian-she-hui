@@ -26,6 +26,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final FirstHolding firstHolding;
     final FoundingVillages villages;
     final RefugeOffice refuge;
+    final ManorRooms rooms;
+    final MineralRegister minerals;
+    final MineOffice mines;
     final CrossingOffice crossings;
     public final social.feudal.transport.HaulNetwork roads;
     public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
@@ -58,6 +61,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
+        rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);
         firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         if(store.ready()) restoreMap();
@@ -65,6 +69,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);
         markers=new DepotMarkers(this);new SeatEnvoys(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
+    }
+    String solePersonalManor(Player p)throws SQLException{
+        return store.value("SELECT min(id) FROM manor WHERE owner=? HAVING count(*)=1",p.getUniqueId().toString());
     }
     private void restoreMap() throws SQLException {
         String saved=store.value("SELECT v FROM setting WHERE k='map'");
@@ -100,6 +107,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             if(Set.of("start","seekland","clearhome","stakehome","firstname","firstdeed","firstmill").contains(action)){
                 firstHolding.run(player(s),a);return true;
             }
+            if(action.equals("buildings")){BuildingAtlas.open(this,player(s),a);return true;}
             if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
                 s.sendMessage("/realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
@@ -132,10 +140,17 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                         villages.enroll();s.sendMessage("已登记三处初始聚落。需要指定干地时使用 /realm foundingvillages 辖区代号 中心X 中心Z");
                     }
                 }
+                case "territory" -> new TerritorialControl(this).run(player(s),a);
+                case "surrenderform" -> {
+                    usage(a.length==2,"surrenderform 领地");
+                    DiplomacyDesk.form(player(s),"整领交接","对方在治所接印后，人口随整领转入实际占领国。私产仍归原主。","realm territory "+a[1]+" 交印",List.of(new DiplomacyDesk.Field("nation","接管国代号","",24)));
+                }
+                case "pitform" -> DiplomacyDesk.form(player(s),"设立领地矿场","在已核矿区瞄准配有支柱和工作台的坑口木桶。","realm mineopen",List.of(new DiplomacyDesk.Field("id","矿场代号","",24)));
+                case "sample","mineopen","minework","minegrant","mine" -> mines.run(player(s),a);
                 case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "kitchen","mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
-                case "asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
+                case "room","expand","expandform","asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);

@@ -144,7 +144,7 @@ final class RefugeOffice {
         }
         if(nextIndex<path.size()-1){s.update("UPDATE migration SET step=? WHERE id=?",nextIndex,id);return;}
         team.halt();
-        if(ManorHousing.capacity(w,realm.manors.register.manor(dest))-
+        if(realm.manors.capacity(realm.manors.register.manor(dest))-
                 realm.manors.register.manor(dest).residents()<people){status(id,"到站等候修复住房");return;}
         s.atomic(()->{
             if(s.update("UPDATE migration SET arrived=1,status='抵达',step=? WHERE id=? AND arrived=0",nextIndex,id)==1)

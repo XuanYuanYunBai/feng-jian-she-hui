@@ -50,6 +50,11 @@ final class ManorOffice implements Listener {
                     boolean supplied=s.number("SELECT settled FROM manor WHERE id=?",id)>0;
                     if(loaded(m.estate())){
                         var bin=foodBarrel(m);
+                        if(newSeason && bin!=null){
+                            int stock=0;
+                            for(var item:bin.getInventory().getContents())if(item!=null && item.getType()==Material.BREAD)stock+=item.getAmount();
+                            s.update("INSERT OR IGNORE INTO pantry_snapshot VALUES(?,?,?)",id,season+1,stock);
+                        }
                         supplied=bin!=null && stocked(bin.getInventory(),Math.ceilDiv(m.residents(),100));
                     }
                     if(supplied)s.update("UPDATE manor SET settled=settled+10 WHERE id=?",id);
@@ -83,7 +88,7 @@ final class ManorOffice implements Listener {
     }
 
     private void settle(SettlementRegister.Manor m,int season)throws SQLException{
-        int housing=ManorHousing.capacity(realm.world,m);
+        int housing=capacity(m);
         int reserved=s.number("SELECT coalesce(sum(people),0) FROM migration WHERE dest=? AND arrived=0",m.id());
         int places=Math.max(0,housing-reserved);
         if(season<=s.number("SELECT grace_until FROM manor WHERE id=?",m.id()))places=Math.max(places,m.residents());
@@ -104,7 +109,8 @@ final class ManorOffice implements Listener {
                 replay=true;
             }
         }
-        var meal=ResidentSeason.close(m.residents(),places,stock,credit,carry,streak);
+        int observed=s.number("SELECT stock FROM pantry_snapshot WHERE manor=? AND season=?",m.id(),season);
+        var meal=ResidentSeason.close(m.residents(),places,stock,credit,carry,streak,observed);
         if(!replay && meal.bread()>0){
             var inv=barrel.getSnapshotInventory();
             int remaining=meal.bread();
@@ -124,6 +130,7 @@ final class ManorOffice implements Listener {
         int closing=m.residents()+meal.births()-meal.deaths();
         final int surplus=stock-meal.bread();
         s.atomic(()->{
+            s.update("DELETE FROM pantry_snapshot WHERE manor=? AND season<=?",m.id(),season);
             s.update("INSERT INTO population_season VALUES(?,?,?,?,?,?,?,?,?)",m.id(),season,m.residents(),housing,
                     meal.bread(),meal.shortfall(),meal.births(),meal.deaths(),closing);
             s.update("""
@@ -156,7 +163,10 @@ final class ManorOffice implements Listener {
             if(Tag.FENCES.isTagged(mat)||Tag.FENCE_GATES.isTagged(mat)||Tag.WALLS.isTagged(mat)||Tag.LEAVES.isTagged(mat)||mat==Material.WATER)return true;
         }return false;
     }
-    int inspect(SettlementRegister.Manor m){
+    int capacity(SettlementRegister.Manor m)throws SQLException{
+        return ManorHousing.capacity(realm.world,m,realm.rooms.site(m.id(),"私床"));
+    }
+    int inspect(SettlementRegister.Manor m)throws SQLException{
         var b=m.estate();
         require(b.east()>=b.west() && b.south()>=b.north() && (long)b.east()-b.west()<96 && (long)b.south()-b.north()<96
                 && b.contains(m.x(),m.z()),"请在厅内登记不超过 96 格长宽的庄园");
@@ -172,7 +182,7 @@ final class ManorOffice implements Listener {
             if(!gate)for(int h=-2;h<=2;h++)if(Tag.FENCE_GATES.isTagged(realm.world.getBlockAt(x,m.y()+h,z).getType()))gate=true;
         }
         require(gate,"请为庄园设一座可通行的栅栏门");
-        int capacity=ManorHousing.capacity(realm.world,m);
+        int capacity=capacity(m);
         require(capacity>=m.residents(),"民房可住 "+capacity+" 人，需要 "+m.residents()+"。床旁留两格高通道，四面设墙和可进出的门，上方封顶。");
         return capacity;
     }
@@ -184,13 +194,17 @@ final class ManorOffice implements Listener {
     }
     void archive(Player p,String id)throws SQLException{
         var m=register.manor(id);var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
-        int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
+        buttons.add(command("建筑图谱","realm buildings"));int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
         body.add(text("在住 "+m.residents()+" 人　｜　可住 "+housing+" 人　｜　"+(housing>=m.residents()?"空位 "+(housing-m.residents()):"拥挤 "+(m.residents()-housing))+" 人"));
         body.add(text("业主　"+realm.display(m.owner())+"　｜　每张室内床提供 100 个住位"));
         body.add(text("厅堂　"+m.x()+"，"+m.y()+"，"+m.z()+"　｜　完成赈济 "+m.service()+" 季"));
         if(s.number("SELECT grace_until FROM manor WHERE id=?",id)>register.season())
             body.add(text("旧庄改建宽限至下一次结季，请到厅堂验收民房。"));
         if(register.manages(m,p.getUniqueId().toString())){
+            buttons.add(command("扩建庄界","realm expandform "+id));
+            buttons.add(command("登记所在大厅","realm room "+id+" 大厅"));
+            buttons.add(command("入住所在私室","realm room "+id+" 私室"));
+            buttons.add(command("登记所在议事厅","realm room "+id+" 议事厅"));
             boolean open=s.number("SELECT count(*) FROM asylum WHERE manor=?",id)>0;
             buttons.add(command(open?"暂停接纳迁居":"开放余房收容","realm asylum "+id+(open?" 停止":" 接纳")));
             for(var line:realm.diplomacy.column("""
@@ -207,6 +221,10 @@ final class ManorOffice implements Listener {
                 int bread=0;
                 for(var stack:pantry.getInventory().getContents())if(stack!=null && stack.getType()==Material.BREAD)bread+=stack.getAmount();
                 int credit=s.number("SELECT ration_credit FROM manor WHERE id=?",id);
+                int reserved=s.number("SELECT coalesce(sum(people),0) FROM migration WHERE dest=? AND arrived=0",id);
+                var forecast=ResidentSeason.close(m.residents(),Math.max(0,housing-reserved),bread,credit,
+                        s.number("SELECT growth_remainder FROM manor WHERE id=?",id),0);
+                body.add(text("按现有房粮预计出生 "+forecast.births()+" 人　｜　季末以可用床位和实仓验收"));
                 int deficit=Math.max(0,m.residents()-bread*100-credit);
                 body.add(text("仓内面包 "+bread+" 个　｜　上季余下 "+credit+" 人份　｜　下季预计缺 "+deficit+" 人份"));
             }
@@ -227,7 +245,7 @@ final class ManorOffice implements Listener {
         for(String id:realm.diplomacy.column("SELECT id FROM manor ORDER BY name"))buttons.add(command(register.manor(id).name(),"realm manor "+id));
         for(String n:realm.diplomacy.column("SELECT id FROM claim WHERE state='公示中' ORDER BY id DESC"))buttons.add(command("待审边界 #"+n,"realm hearing "+n));
         buttons.add(command("测量并立庄","realm estateform"));buttons.add(command("返回纹章院","realm atlas"));
-        show(p,"地籍与地方公议",List.of(text("在当地围建庄园，设门、讲台、赈济木桶和床位。稳定居住 600 人并赈济一季后，可将庄宅登记为新领邦首都。")),List.of(),buttons,2);
+        show(p,"地籍与地方公议",List.of(text("在当地围建庄园，设门、讲台、赈济木桶和床位。稳定居住 200 人并赈济一季后，可将庄宅登记为新领邦首都。")),List.of(),buttons,2);
     }
     @EventHandler(ignoreCancelled=true) public void use(PlayerInteractEvent e)throws SQLException{
         if(e.getHand()!=EquipmentSlot.HAND || e.getAction()!=Action.RIGHT_CLICK_BLOCK || e.getClickedBlock()==null)return;
@@ -239,6 +257,28 @@ final class ManorOffice implements Listener {
     void run(Player p,String[] a)throws SQLException{
         realm.inWorld(p);String actor=p.getUniqueId().toString();var l=p.getLocation();
         switch(a[0]){
+            case "expand","expandform" -> {
+                boolean form=a[0].equals("expandform");
+                usage(a.length==(form?2:6),"expand 庄园 西 北 东 南");
+                var m=register.manor(a[1]);hall(p,m);require(m.owner().equals(actor),"须由庄主扩院");
+                var old=m.estate();
+                if(form){
+                    DiplomacyDesk.form(p,"扩建庄界","按方块坐标填写已围好的新院界，须包含整个原庄。","realm expand "+m.id(),
+                        List.of(new DiplomacyDesk.Field("bounds","西 北 东 南",old.west()+" "+old.north()+" "+old.east()+" "+old.south(),64)));
+                }else{
+                    var b=bounds(a,2);
+                    require(b.contains(old.west(),old.north()) && b.contains(old.east(),old.south()) && !old.equals(b),"新院界须包含完整原院并向外扩展");
+                    realm.firstHolding.border(b);
+                    var expanded=new SettlementRegister.Manor(m.id(),m.name(),m.owner(),m.x(),m.y(),m.z(),b,m.residents(),m.service(),m.cottage());
+                    int housing=inspect(expanded);register.available(actor,b,m.id());
+                    s.update("UPDATE manor SET west=?,north=?,east=?,south=?,housing=? WHERE id=?",b.west(),b.north(),b.east(),b.south(),housing,m.id());
+                    realm.changed();archive(p,m.id());
+                }
+            }
+            case "room" -> {
+                usage(a.length==3 || (a.length==4 && a[3].equals("确认")),"room 庄园 大厅|私室|议事厅");
+                realm.rooms.register(p,register.manor(a[1]),a[2],a.length==4);
+            }
             case "asylum" -> {
                 usage(a.length==3 && Set.of("接纳","停止").contains(a[2]),"asylum 庄园 接纳|停止");
                 realm.refuge.policy(p,a[1],a[2].equals("接纳"));archive(p,a[1]);
@@ -248,8 +288,7 @@ final class ManorOffice implements Listener {
                 var country=register.census().stream().filter(row->row.id().equals(a[1])).findFirst()
                         .orElseThrow(()->new IllegalArgumentException("人口簿中没有这处辖地"));
                 var ids=realm.diplomacy.column("""
-                    SELECT m.id FROM manor m LEFT JOIN land l ON l.x=(m.x>>4) AND l.z=(m.z>>4)
-                    LEFT JOIN affiliation a ON a.title=l.title WHERE coalesce(a.nation,l.title,'@')=?
+                    SELECT m.id FROM manor m JOIN dwelling_jurisdiction j USING(id) WHERE j.district=?
                     ORDER BY m.name,m.id""",country.id());
                 int page=a.length==3?Integer.parseInt(a[2]):1;
                 int pages=Math.max(1,Math.ceilDiv(ids.size(),7));
@@ -290,7 +329,7 @@ final class ManorOffice implements Listener {
                 usage(a.length==2,"housing 庄园");var m=register.manor(a[1]);hall(p,m);
                 require(register.manages(m,actor),"须由庄主或公产持印人验房");
                 require(loaded(m.estate()),"请待庄园区块加载");
-                s.update("UPDATE manor SET housing=? WHERE id=?",ManorHousing.capacity(realm.world,m),m.id());
+                s.update("UPDATE manor SET housing=? WHERE id=?",capacity(m),m.id());
                 realm.changed();archive(p,m.id());
             }
             case "estates" -> directory(p);
@@ -315,6 +354,7 @@ final class ManorOffice implements Listener {
             case "found","frontier" -> {
                 usage(a.length==7,a[0]+" 庄园 入帝|独立（开拓填头衔ID） 西 北 东 南");
                 var m=register.manor(a[1]);hall(p,m);inspect(m);boolean founding=a[0].equals("found");
+                if(founding)realm.rooms.council(m);
                 int n=register.propose(actor,m.id(),founding?m.id():a[2],founding?a[2]:"开拓",bounds(a,3),System.currentTimeMillis()/1000,noticeSeconds);
                 realm.changed();p.sendMessage("边界公示 #"+n+" 已张贴");hearing(p,n);
             }
@@ -324,7 +364,7 @@ final class ManorOffice implements Listener {
             case "cancelclaim","enact" -> {
                 usage(a.length==2,a[0]+" 公示号");var c=register.claim(Integer.parseInt(a[1]));var m=register.manor(c.manor());hall(p,m);
                 require(m.owner().equals(actor),"须由申请人办理");
-                if(a[0].equals("enact")){inspect(m);register.resolve(c.id(),actor,System.currentTimeMillis()/1000);}
+                if(a[0].equals("enact")){inspect(m);if(!c.type().equals("开拓"))realm.rooms.council(m);register.resolve(c.id(),actor,System.currentTimeMillis()/1000);}
                 else require(s.update("UPDATE claim SET state='撤案' WHERE id=? AND state='公示中'",c.id())==1,"此案已结");
                 realm.council.succession.sync();realm.changed();hearing(p,c.id());
             }

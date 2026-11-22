@@ -9,6 +9,9 @@ class ResidentSeasonTest {
     @TempDir Path dir;
     @Test void foodGrowthAndSevereFamine(){
         var full=ResidentSeason.close(100,200,1,0,0,0);
+        assertEquals(8,ResidentSeason.close(100,200,3,0,0,0).births());
+        assertEquals(5,ResidentSeason.close(100,150,3,0,0,0).births());
+        assertEquals(2,ResidentSeason.close(100,200,3,0,0,0,1).births());
         assertEquals(1,full.bread());assertEquals(2,full.births());
         assertEquals(0,ResidentSeason.close(100,100,4,0,0,0).births());
         var shortSeason=ResidentSeason.close(300,400,2,0,0,0);

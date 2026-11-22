@@ -29,6 +29,7 @@ final class SettlementRegister {
                 return null;
             });
         }
+        s.update("CREATE TABLE IF NOT EXISTS pantry_snapshot(manor TEXT REFERENCES manor(id),season INTEGER,stock INTEGER,PRIMARY KEY(manor,season))");
         s.update("""
             CREATE TABLE IF NOT EXISTS population_season(manor TEXT REFERENCES manor(id),season INTEGER,
             opening INTEGER,capacity INTEGER,bread INTEGER,shortfall INTEGER,births INTEGER,deaths INTEGER,
@@ -39,6 +40,7 @@ final class SettlementRegister {
         s.update("""
             CREATE TABLE IF NOT EXISTS land_objection(claim INTEGER REFERENCES claim(id),x INTEGER,z INTEGER,
             actor TEXT,reason TEXT,PRIMARY KEY(claim,x,z,actor))""");
+        TerritorialControl.schema(s);
         s.update("CREATE TABLE IF NOT EXISTS frontier_seal(title TEXT PRIMARY KEY REFERENCES title(id),issuer TEXT REFERENCES title(id),west INTEGER,north INTEGER,east INTEGER,south INTEGER)");
         s.update("CREATE TABLE IF NOT EXISTS peerage(title TEXT PRIMARY KEY REFERENCES nation(id),state TEXT NOT NULL,reason TEXT NOT NULL)");
         s.update("CREATE TABLE IF NOT EXISTS capital(nation TEXT PRIMARY KEY REFERENCES nation(id),manor TEXT REFERENCES manor(id))");
@@ -59,7 +61,10 @@ final class SettlementRegister {
         return title!=null && s.title(title).seal().equals(actor);
     }
     void available(String actor,Charters.Bounds b)throws SQLException{
-        require(s.number("SELECT count(*) FROM manor WHERE west<=? AND east>=? AND north<=? AND south>=?",b.east(),b.west(),b.south(),b.north())==0,"与已有庄园重叠");
+        available(actor,b,"");
+    }
+    void available(String actor,Charters.Bounds b,String existing)throws SQLException{
+        require(s.number("SELECT count(*) FROM manor WHERE id<>? AND west<=? AND east>=? AND north<=? AND south>=?",existing,b.east(),b.west(),b.south(),b.north())==0,"与已有庄园重叠");
         for(int cx=b.west()>>4;cx<=b.east()>>4;cx++)for(int cz=b.north()>>4;cz<=b.south()>>4;cz++){
             String owner=s.owner(cx,cz);require(owner==null || s.title(owner).seal().equals(actor),"建庄涉及他领，请先取得土地");
         }
@@ -115,9 +120,7 @@ final class SettlementRegister {
         try(var q=s.sql("""
                 WITH districts(id,name) AS (SELECT n.id,t.name FROM nation n JOIN title t USING(id)
                     UNION ALL SELECT 'crown',name FROM title WHERE id='crown' UNION ALL SELECT '@','未建领聚落'),
-                homes AS (SELECT m.*,l.title,coalesce(a.nation,l.title,'@') AS district
-                    FROM manor m LEFT JOIN land l ON l.x=(m.x>>4) AND l.z=(m.z>>4)
-                    LEFT JOIN affiliation a ON a.title=l.title)
+                homes AS (SELECT m.*,j.title,j.district FROM manor m JOIN dwelling_jurisdiction j USING(id))
                 SELECT d.id,d.name,coalesce(sum(h.residents),0),
                     coalesce(sum(CASE WHEN h.title=d.id THEN h.residents ELSE 0 END),0),
                     coalesce(sum(h.housing),0),count(h.id)
@@ -161,7 +164,7 @@ final class SettlementRegister {
             require(b.contains(m.x()>>4,m.z()>>4),"须在选区内建立庄园驻地");
             if(founding){
                 require(title.equals(id) && s.value("SELECT id FROM title WHERE id=?",title)==null,"该庄园已建领或代号已占用");
-                require(m.residents()>=600 && m.service()>0,"建领需要 600 人和连续一季公共服务");
+                require(m.residents()>=200 && m.service()>0,"建领需要 200 人和连续一季公共服务");
                 require(type.equals("入帝") || s.politics.choiceOpen(),"首位玩家皇帝即位前，新领自动加入帝国");
             }else{
                 new Charters(s).acts(title,actor);opening(title,b);adjacent(title,b);
@@ -188,7 +191,7 @@ final class SettlementRegister {
             if(frontier){
                 new Charters(s).acts(c.title(),actor);opening(c.title(),c.area());adjacent(c.title(),c.area());
                 require(m.residents()>=100*Math.ceilDiv(c.area().area(),4) && m.service()>0,"开拓地需维持住户和一季供养");
-            }else require(m.residents()>=600 && m.service()>0,"建领资格已变化");
+            }else require(m.residents()>=200 && m.service()>0,"建领资格已变化");
             var cells=new ArrayList<int[]>();var b=c.area();
             for(int x=b.west();x<=b.east();x++)for(int z=b.north();z<=b.south();z++){
                 if(s.owner(x,z)!=null || s.number("SELECT count(*) FROM land_objection WHERE claim=? AND x=? AND z=?",n,x,z)>0)continue;
