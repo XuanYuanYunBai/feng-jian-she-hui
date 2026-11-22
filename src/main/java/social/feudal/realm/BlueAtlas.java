@@ -46,6 +46,15 @@ final class BlueAtlas implements Runnable {
             try(var q=s.sql("SELECT id,type,west,north,east,south FROM claim WHERE state='公示中'");var r=q.executeQuery()){
                 while(r.next())put(hearings,r.getString(1),r.getString(2)+"公示 #"+r.getInt(1),16*r.getInt(3),16*r.getInt(4),16*(r.getInt(5)+1),16*(r.getInt(6)+1),0xb55c37);
             }
+            var transfers=new MarkerSet("整领实控交接",true,true);
+            try(var q=s.sql("""
+                    SELECT l.x,l.z,t.name,n.name FROM land l JOIN occupation o ON o.title=l.title AND o.active=1
+                    JOIN title t ON t.id=l.title JOIN title n ON n.id=o.nation""");var rows=q.executeQuery()){
+                while(rows.next()){
+                    int x=rows.getInt(1),z=rows.getInt(2);
+                    put(transfers,x+"_"+z,rows.getString(3)+" · 实际控制国 "+rows.getString(4),16*x,16*z,16*(x+1),16*(z+1),0xc36335);
+                }
+            }
             var tolls=bridgeMarkers(s);
             var markets=new MarkerSet("玩家商站",true,false);
             try(var q=s.sql("""
@@ -91,7 +100,7 @@ final class BlueAtlas implements Runnable {
             }
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
-                sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
+                sets.put("feudal-control",transfers);sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
                 sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-markets",markets);sets.put("feudal-ferries",ferries);
             }
             previous=api;published=realm.mapRevision;

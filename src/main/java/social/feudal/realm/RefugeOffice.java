@@ -69,7 +69,7 @@ final class RefugeOffice {
             var pantry=realm.manors.foodBarrel(host);
             if(pantry==null)return false;
             int bread=0;
-            for(var stack:pantry.getInventory().getContents())if(stack!=null && stack.getType()==Material.BREAD)bread+=stack.getAmount();
+            for(var stack:pantry.getInventory().getContents())if(ReliefOffice.plain(stack))bread+=stack.getAmount();
             int capacity=Math.min(spare,bread*100-host.residents()-waiting);
             int people=Math.min(Math.min(100,origin.residents()),Math.min(missing,capacity));
             if(people<=0)return false;

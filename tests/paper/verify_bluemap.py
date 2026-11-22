@@ -65,6 +65,17 @@ def compare(db, layers):
     return f"通过 · {len(mapped_land)} 个区块，{len(bridges)} 座桥亭，{len(expected_deeds)} 份待签文书"
 
 
+def check_control(db, markers):
+    expected = {f"{x}_{z}": ((16*x, 16*z, 16*(x+1), 16*(z+1)), f"{title} · 实际控制国 {nation}")
+                for x, z, title, nation in db.execute("""
+                    SELECT l.x,l.z,t.name,n.name FROM land l JOIN occupation o ON o.title=l.title
+                    JOIN title t ON t.id=l.title JOIN title n ON n.id=o.nation WHERE o.active=1""")}
+    actual = {key: (bounds(marker), html.unescape(marker["label"])) for key, marker in markers.items()}
+    if actual != expected:
+        raise ValueError("整领实控图层与生效交印不相符")
+    return f"，{len(expected)} 个交接实控区块"
+
+
 def check_markets(db, markers):
     stalls = {row[0]: row[1:] for row in db.execute("""
             SELECT t.id,t.name,t.x,t.y,t.z,count(b.id) FROM stall t
@@ -118,6 +129,8 @@ if __name__ == "__main__":
                     markers = json.load(response)
                 db.execute("BEGIN")
                 result = compare(db, markers)
+                if db.execute("SELECT 1 FROM sqlite_schema WHERE name='occupation'").fetchone():
+                    result += check_control(db, markers["feudal-control"]["markers"])
                 if "feudal-network" in markers:
                     result += check_routes(args.database.with_name("freight.sqlite"), markers)
                 if "feudal-markets" in markers:

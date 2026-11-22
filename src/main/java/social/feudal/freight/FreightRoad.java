@@ -124,7 +124,7 @@ final class FreightRoad {
         ItemStack stack = b.getSnapshotInventory().getItem(0);
         if (stack == null || !Set.of(Material.WHEAT, Material.WHITE_WOOL, Material.OAK_LOG, Material.BREAD, Material.IRON_INGOT).contains(stack.getType())
                 || stack.getAmount() < 1 || stack.getAmount() > 64)
-            throw new IllegalArgumentException("请将 1–64 件小麦、白色羊毛或橡木原木放入起点桶第一格");
+            throw new IllegalArgumentException("请将 1–64 件小麦、面包、铁锭、白色羊毛或橡木原木放入起点桶第一格");
         Team team=team(r);
         if(stack.getAmount()>team.capacity())throw new IllegalArgumentException("本队每趟上限 "+team.capacity()+" 件，请分批或在起点升级装备");
         world.save(true);

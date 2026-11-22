@@ -48,11 +48,20 @@ final class ManorOffice implements Listener {
                 for(String id:realm.diplomacy.column("SELECT id FROM manor")){
                     var m=register.manor(id);
                     boolean supplied=s.number("SELECT settled FROM manor WHERE id=?",id)>0;
-                    if(loaded(m.estate())){
+                    boolean pantryLoaded=loaded(m.estate());
+                    if(newSeason && !pantryLoaded){
+                        // Only the hall and its possible adjacent pantry chunks are needed at the common cutoff.
+                        pantryLoaded=true;
+                        for(var side:List.of(BlockFace.SELF,BlockFace.NORTH,BlockFace.SOUTH,BlockFace.EAST,BlockFace.WEST)){
+                            int cx=(m.x()+side.getModX())>>4,cz=(m.z()+side.getModZ())>>4;
+                            if(!realm.world.isChunkLoaded(cx,cz) && !realm.world.loadChunk(cx,cz,false))pantryLoaded=false;
+                        }
+                    }
+                    if(pantryLoaded){
                         var bin=foodBarrel(m);
                         if(newSeason && bin!=null){
                             int stock=0;
-                            for(var item:bin.getInventory().getContents())if(item!=null && item.getType()==Material.BREAD)stock+=item.getAmount();
+                            for(var item:bin.getInventory().getContents())if(ReliefOffice.plain(item))stock+=item.getAmount();
                             s.update("INSERT OR IGNORE INTO pantry_snapshot VALUES(?,?,?)",id,season+1,stock);
                         }
                         supplied=bin!=null && stocked(bin.getInventory(),Math.ceilDiv(m.residents(),100));
@@ -102,7 +111,7 @@ final class ManorOffice implements Listener {
         boolean replay=false;
         if(barrel!=null){
             var inventory=barrel.getSnapshotInventory();
-            for(var item:inventory.getContents())if(item!=null && item.getType()==Material.BREAD)stock+=item.getAmount();
+            for(var item:inventory.getContents())if(ReliefOffice.plain(item))stock+=item.getAmount();
             var receipt=barrel.getPersistentDataContainer().get(stamp,PersistentDataType.STRING);
             if(receipt!=null && receipt.startsWith(prefix)){
                 stock=Integer.parseInt(receipt.substring(prefix.length()));
@@ -116,7 +125,7 @@ final class ManorOffice implements Listener {
             int remaining=meal.bread();
             for(int slot=0;slot<inv.getSize() && remaining>0;slot++){
                 var stack=inv.getItem(slot);
-                if(stack==null || stack.getType()!=Material.BREAD)continue;
+                if(!ReliefOffice.plain(stack))continue;
                 int take=Math.min(stack.getAmount(),remaining);
                 stack.setAmount(stack.getAmount()-take);
                 inv.setItem(slot,stack.getAmount()==0?null:stack);
@@ -194,13 +203,16 @@ final class ManorOffice implements Listener {
     }
     void archive(Player p,String id)throws SQLException{
         var m=register.manor(id);var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
-        buttons.add(command("建筑图谱","realm buildings"));int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
+        buttons.add(command("建筑图谱","realm buildings"));
+        buttons.add(command("跨庄赈济","realm relief "+id));
+        int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
         body.add(text("在住 "+m.residents()+" 人　｜　可住 "+housing+" 人　｜　"+(housing>=m.residents()?"空位 "+(housing-m.residents()):"拥挤 "+(m.residents()-housing))+" 人"));
         body.add(text("业主　"+realm.display(m.owner())+"　｜　每张室内床提供 100 个住位"));
         body.add(text("厅堂　"+m.x()+"，"+m.y()+"，"+m.z()+"　｜　完成赈济 "+m.service()+" 季"));
         if(s.number("SELECT grace_until FROM manor WHERE id=?",id)>register.season())
             body.add(text("旧庄改建宽限至下一次结季，请到厅堂验收民房。"));
         if(register.manages(m,p.getUniqueId().toString())){
+            buttons.add(command("铁匠铺与工单","realm smith "+id));
             buttons.add(command("扩建庄界","realm expandform "+id));
             buttons.add(command("登记所在大厅","realm room "+id+" 大厅"));
             buttons.add(command("入住所在私室","realm room "+id+" 私室"));
@@ -219,7 +231,7 @@ final class ManorOffice implements Listener {
             var pantry=loaded(m.estate())?foodBarrel(m):null;
             if(pantry!=null){
                 int bread=0;
-                for(var stack:pantry.getInventory().getContents())if(stack!=null && stack.getType()==Material.BREAD)bread+=stack.getAmount();
+                for(var stack:pantry.getInventory().getContents())if(ReliefOffice.plain(stack))bread+=stack.getAmount();
                 int credit=s.number("SELECT ration_credit FROM manor WHERE id=?",id);
                 int reserved=s.number("SELECT coalesce(sum(people),0) FROM migration WHERE dest=? AND arrived=0",id);
                 var forecast=ResidentSeason.close(m.residents(),Math.max(0,housing-reserved),bread,credit,

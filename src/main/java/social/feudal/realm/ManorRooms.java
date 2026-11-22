@@ -94,7 +94,8 @@ final class ManorRooms implements Listener {
         return false;
     }
     void council(SettlementRegister.Manor m)throws SQLException{
-        var room=hall(site(m.id(),"议事厅"),m);
+        var seat=site(m.id(),"议事厅");require(seat!=null,"请先从庄档登记实际议事厅");
+        var room=hall(seat,m);
         boolean desk=false,bell=false,archive=false;int seats=0;
         for(var b:room.furniture){
             switch(b.getType()){case LECTERN -> desk=true;case BELL -> bell=true;case BARREL -> archive=true;default -> {}}
@@ -128,6 +129,8 @@ final class ManorRooms implements Listener {
                     List.of(command("确认入住","realm room "+m.id()+" 私室 确认")),1);return;
             }
             Block old=site(m.id(),"私柜");
+            var cabinet=(Barrel)bins.getFirst().getState();
+            for(var viewer:List.copyOf(cabinet.getInventory().getViewers()))if(!viewer.equals(p))viewer.closeInventory();
             s.atomic(()->{mark(m.id(),"私床",bed.getFirst());mark(m.id(),"私柜",bins.getFirst());return null;});
             if(old!=null)cabinets.remove(old);cabinets.put(bins.getFirst(),m.owner());
             s.update("UPDATE manor SET housing=? WHERE id=?",realm.manors.capacity(m),m.id());

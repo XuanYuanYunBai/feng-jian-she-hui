@@ -35,6 +35,7 @@ final class MillOffice implements Listener {
     MillOffice(RealmService r)throws SQLException{
         realm=r;s=r.store;navigation=new FootNavigation(r.plugin);loadTarget=new NamespacedKey(r.plugin,"field_target");
         s.update("CREATE TABLE IF NOT EXISTS mill(id TEXT PRIMARY KEY,manor TEXT REFERENCES manor(id),x INTEGER,y INTEGER,z INTEGER,tier INTEGER,UNIQUE(x,y,z))");
+        s.update("CREATE TABLE IF NOT EXISTS mill_permit(mill TEXT PRIMARY KEY REFERENCES mill(id),title TEXT REFERENCES title(id),issuer TEXT)");
         s.update("CREATE TABLE IF NOT EXISTS field(x INTEGER,y INTEGER,z INTEGER,mill TEXT REFERENCES mill(id),PRIMARY KEY(x,y,z))");
         s.update("""
             CREATE TABLE IF NOT EXISTS farmhand(id INTEGER PRIMARY KEY,mill TEXT REFERENCES mill(id),season INTEGER,
@@ -82,9 +83,18 @@ final class MillOffice implements Listener {
                 require(count("SELECT count(*) FROM mill WHERE id=? OR (x=? AND y=? AND z=?)",site.id(),site.x(),site.y(),site.z())==0,"磨坊代号或磨石已登记");
                 s.update("INSERT INTO mill VALUES(?,?,?,?,?,1)",site.id(),m.id(),site.x(),site.y(),site.z());page(p,site);
             }
+            case "millpermit" -> {
+                usage(a.length==2,"millpermit 磨坊");var m=get(a[1]);String district=s.owner(m.x()>>4,m.z()>>4);
+                String actor=p.getUniqueId().toString();
+                require(district!=null && s.title(district).seal().equals(actor),"请由本领持印人签发磨坊特许");
+                s.update("INSERT OR REPLACE INTO mill_permit VALUES(?,?,?)",m.id(),district,actor);
+                p.sendMessage("已批准本磨坊扩建，业主须亲自增设工位和附仓。");
+            }
             case "millup" -> {
                 usage(a.length==2,"millup 磨坊");var m=get(a[1]);local(p,m);
                 require(m.tier()<3 && usable(m),"先修复磨坊，最高三级");
+                String district=s.owner(m.x()>>4,m.z()>>4);
+                require(district!=null && (s.title(district).seal().equals(p.getUniqueId().toString()) || count("SELECT count(*) FROM mill_permit WHERE mill=? AND title=? AND issuer=?",m.id(),district,s.title(district).seal())>0),"多工班水磨须位于已建领土地，并由本领持印人批准扩建");
                 int tier=m.tier()+1;
                 for(int n=1;n<tier;n++)require(wheel(m).getRelative(2,n-1,0).getType()==Material.BARREL
                         && wheel(m).getRelative(-2,n-1,0).getType()==Material.COMPOSTER,"扩建东侧附仓和西侧农具工位，升三级时再加一层");
@@ -153,14 +163,10 @@ final class MillOffice implements Listener {
         body.add(text("常设工班将口粮送回厅旁木桶，储足两季及三份赈粮后春播秋收。木案与营火旁须留通道。"));
         show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一班收麦","realm farmjob "+m.id()+" 收麦"),command("派一班补种","realm farmjob "+m.id()+" 补种"),
                 command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("登记眼前木案","realm kitchen "+m.id()+" 木案"),
-                command("登记眼前营火","realm kitchen "+m.id()+" 营火"),command(standing?"下季停办口粮":"常设口粮工班","realm kitchen "+m.id()+(standing?" 停办":" 常设")),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
+                command("登记眼前营火","realm kitchen "+m.id()+" 营火"),command(standing?"下季停办口粮":"常设口粮工班","realm kitchen "+m.id()+(standing?" 停办":" 常设")),command("签发领地扩建许可","realm millpermit "+m.id()),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
     }
     private int remainingHours(Mill m,int season)throws SQLException{
-        int people=realm.manors.register.manor(m.manor()).residents();
-        int missing=count("SELECT shortfall FROM population_season WHERE manor=? ORDER BY season DESC LIMIT 1",m.manor());
-        int hours=(int)((long)Math.max(0,people-missing)*64/100);
-        int assigned=count("SELECT count(*) FROM farmhand JOIN mill ON mill.id=farmhand.mill WHERE manor=? AND season=?",m.manor(),season);
-        return Math.min(64,hours-assigned*64);
+        return Math.min(64,realm.labor.remaining(m.manor(),season));
     }
     private void standing(Mill m)throws SQLException{
         int season=realm.manors.register.season();

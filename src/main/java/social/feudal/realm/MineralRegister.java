@@ -82,6 +82,18 @@ final class MineralRegister implements Listener {
         if(k==0 || b.getWorld()!=realm.world)return;
         e.setExpToDrop(0);e.setDropItems(false);
         try{
+            String actor=e.getPlayer().getUniqueId().toString();
+            String title=s.owner(b.getX()>>4,b.getZ()>>4);
+            if(title!=null && !s.title(title).seal().equals(actor)){
+                String holder=s.title(title).seal();
+                int permitted=s.number("""
+                    SELECT count(*) FROM pit p JOIN pit_contract c ON c.pit=p.id WHERE p.title=?
+                    AND p.cx=? AND p.cz=? AND c.issuer=? AND c.operator=?""",title,b.getX()>>4,b.getZ()>>4,holder,actor);
+                int privateLand=s.number("""
+                    SELECT count(*) FROM manor WHERE owner=? AND west<=? AND east>=? AND north<=? AND south>=?
+                    """,actor,b.getX(),b.getX(),b.getZ(),b.getZ());
+                if(permitted==0 && privateLand==0){e.setCancelled(true);e.getPlayer().sendMessage("须在本人庄地采掘，或取得本领矿场特许。");return;}
+            }
             if(!available(b)){e.getPlayer().sendMessage("此矿位已采或来源未核，清理后无矿产。");return;}
             if(!b.isPreferredTool(e.getPlayer().getInventory().getItemInMainHand()) && e.getPlayer().getGameMode()!=GameMode.CREATIVE){
                 e.setCancelled(true);e.getPlayer().sendMessage("请使用能够采掘这种矿石的镐。");return;
@@ -101,10 +113,22 @@ final class MineralRegister implements Listener {
     @EventHandler(ignoreCancelled=true) public void pull(BlockPistonRetractEvent e){if(affected(e.getBlocks()))e.setCancelled(true);}
     @EventHandler(ignoreCancelled=true) public void blast(EntityExplodeEvent e){e.blockList().removeIf(b->b.getWorld()==realm.world && kind(b.getType())!=0);}
     @EventHandler(ignoreCancelled=true) public void blastBlock(BlockExplodeEvent e){e.blockList().removeIf(b->b.getWorld()==realm.world && kind(b.getType())!=0);}
+    // Renewable mob farms must not mint currency or equipment that a furnace turns back into metal.
+    // Paper marks picked-up equipment with a guaranteed drop chance (> 1). Return these existing goods.
+    static boolean metalLoot(Material type){
+        String name=type.name();
+        return name.startsWith("IRON_") || name.startsWith("COPPER_") || name.startsWith("CHAINMAIL_")
+                || name.startsWith("GOLDEN_") || type==Material.GOLD_NUGGET || type==Material.GOLD_INGOT;
+    }
     @EventHandler(ignoreCancelled=true) public void mobLoot(EntityDeathEvent e){
-        if(e.getEntity().getWorld()!=realm.world)return;
-        if(e.getEntity() instanceof IronGolem || e.getEntity() instanceof Zombie)
-            e.getDrops().removeIf(i->switch(i.getType()){
-                case IRON_INGOT,GOLD_INGOT,GOLD_NUGGET,COPPER_INGOT -> true;default -> false;});
+        if(!(e.getEntity() instanceof Mob mob))return;
+        var retained=new java.util.ArrayList<ItemStack>();
+        var gear=mob.getEquipment();
+        if(gear!=null)for(var slot:org.bukkit.inventory.EquipmentSlot.values()){
+            if(slot==org.bukkit.inventory.EquipmentSlot.SADDLE || slot==org.bukkit.inventory.EquipmentSlot.BODY)continue;
+            var item=gear.getItem(slot);
+            if(metalLoot(item.getType()) && gear.getDropChance(slot)>1f)retained.add(item.clone());
+        }
+        e.getDrops().removeIf(item->metalLoot(item.getType()) && !retained.remove(item));
     }
 }

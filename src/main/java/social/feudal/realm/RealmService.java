@@ -29,6 +29,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final ManorRooms rooms;
     final MineralRegister minerals;
     final MineOffice mines;
+    final WorkAllocation labor;
+    final ReliefOffice relief;
+    final SmithyOffice smiths;
     final CrossingOffice crossings;
     public final social.feudal.transport.HaulNetwork roads;
     public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
@@ -61,7 +64,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
-        rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);
+        labor=new WorkAllocation(store,manors.register);rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);relief=new ReliefOffice(this);smiths=new SmithyOffice(this);
+        Bukkit.getPluginManager().registerEvents(new ProductionTools(),plugin);
         firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         if(store.ready()) restoreMap();
@@ -140,16 +144,24 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                         villages.enroll();s.sendMessage("已登记三处初始聚落。需要指定干地时使用 /realm foundingvillages 辖区代号 中心X 中心Z");
                     }
                 }
+                case "smith","mend" -> smiths.run(player(s),a);
+                case "relief" -> relief.run(player(s),a);
+                case "reliefform" -> {
+                    usage(a.length==2,"reliefform 庄园");DiplomacyDesk.form(player(s),"申请跨庄赈粮","按下季实缺填写面包量。","realm relief "+a[1]+" 申请",List.of(new DiplomacyDesk.Field("quantity","面包数量","1",2)));
+                }
                 case "territory" -> new TerritorialControl(this).run(player(s),a);
                 case "surrenderform" -> {
                     usage(a.length==2,"surrenderform 领地");
                     DiplomacyDesk.form(player(s),"整领交接","对方在治所接印后，人口随整领转入实际占领国。私产仍归原主。","realm territory "+a[1]+" 交印",List.of(new DiplomacyDesk.Field("nation","接管国代号","",24)));
                 }
+                case "minegrantform" -> {
+                    usage(a.length==2,"minegrantform 矿场");DiplomacyDesk.form(player(s),"矿场经营特许","承包人可派班，领印和矿界仍归本领。","realm minegrant "+a[1],List.of(new DiplomacyDesk.Field("operator","在线承包人","",32)));
+                }
                 case "pitform" -> DiplomacyDesk.form(player(s),"设立领地矿场","在已核矿区瞄准配有支柱和工作台的坑口木桶。","realm mineopen",List.of(new DiplomacyDesk.Field("id","矿场代号","",24)));
                 case "sample","mineopen","minework","minegrant","mine" -> mines.run(player(s),a);
                 case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
-                case "kitchen","mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
+                case "millpermit","kitchen","mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
                 case "room","expand","expandform","asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);

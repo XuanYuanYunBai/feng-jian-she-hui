@@ -7,7 +7,6 @@ import org.bukkit.*;
 import org.bukkit.block.*;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.persistence.PersistentDataType;
 import social.feudal.transport.*;
 import static social.feudal.realm.RealmStore.require;
@@ -17,10 +16,10 @@ import static social.feudal.ui.Menus.*;
 final class MineOffice {
     private final RealmService r;
     private final RealmStore s;
-    private final NamespacedKey receipt;
+    private final NamespacedKey receipt,pickUsed;
     private final FootNavigation walking;
     MineOffice(RealmService r)throws SQLException{
-        this.r=r;s=r.store;receipt=new NamespacedKey(r.plugin,"mining_receipt");walking=new FootNavigation(r.plugin);
+        this.r=r;s=r.store;receipt=new NamespacedKey(r.plugin,"mining_receipt");pickUsed=new NamespacedKey(r.plugin,"pit_pick_used");walking=new FootNavigation(r.plugin);
         s.update("""
             CREATE TABLE IF NOT EXISTS pit(id TEXT PRIMARY KEY,title TEXT REFERENCES title(id),x INTEGER,y INTEGER,z INTEGER,
             cx INTEGER,cz INTEGER,UNIQUE(cx,cz))""");
@@ -28,6 +27,11 @@ final class MineOffice {
             CREATE TABLE IF NOT EXISTS pit_shift(id INTEGER PRIMARY KEY,pit TEXT REFERENCES pit(id),x INTEGER,y INTEGER,z INTEGER,
             kind INTEGER,stage INTEGER DEFAULT 0,status TEXT)""");
         s.update("CREATE TABLE IF NOT EXISTS pit_contract(pit TEXT PRIMARY KEY REFERENCES pit(id),issuer TEXT,operator TEXT)");
+        s.update("""
+            CREATE TRIGGER IF NOT EXISTS convey_pit AFTER UPDATE OF title ON land WHEN NEW.title<>OLD.title BEGIN
+              DELETE FROM pit_contract WHERE pit IN (SELECT id FROM pit WHERE cx=NEW.x AND cz=NEW.z);
+              UPDATE pit SET title=NEW.title WHERE cx=NEW.x AND cz=NEW.z;
+            END""");
         s.update("CREATE UNIQUE INDEX IF NOT EXISTS pit_active ON pit_shift(pit) WHERE stage<3");
         Bukkit.getScheduler().runTaskTimer(r.plugin,this::tick,80,10);
     }
@@ -90,12 +94,30 @@ final class MineOffice {
             require(target!=null && target.getChunk().equals(pit.bin().getChunk()) && r.minerals.available(target),"请瞄准本矿区内尚未开采的天然矿面");
             require(approach(target)!=null,"请在工作面旁开通步行矿道");
             require(s.number("SELECT count(*) FROM pit_shift WHERE pit=? AND stage<3",pit.id())==0,"请待本班交矿");
-            s.update("INSERT INTO pit_shift(pit,x,y,z,kind,status) VALUES(?,?,?,?,?,'准备出工')",pit.id(),target.getX(),target.getY(),target.getZ(),MineralRegister.kind(target.getType()));
+            String donor=null;
+            for(String manor:r.diplomacy.column("SELECT id FROM dwelling_jurisdiction WHERE title=? ORDER BY id",pit.title())){
+                var holding=r.manors.register.manor(manor);
+                if((holding.owner().equals(actor) || r.manors.register.manages(holding,holder)) && r.labor.remaining(manor,r.manors.register.season())>=4){
+                    donor=manor;break;
+                }
+            }
+            require(donor!=null,"请先在本领保有四个可支配庄户工时");
+            final String workforce=donor;
+            s.atomic(()->{
+                s.update("INSERT INTO pit_shift(pit,x,y,z,kind,status) VALUES(?,?,?,?,?,'准备出工')",pit.id(),target.getX(),target.getY(),target.getZ(),MineralRegister.kind(target.getType()));
+                r.labor.reserve(workforce,4,"采矿/"+s.number("SELECT last_insert_rowid()"));return null;
+            });
         }
         String state=s.value("SELECT status FROM pit_shift WHERE pit=? ORDER BY id DESC LIMIT 1",pit.id());
+        var buttons=new ArrayList<io.papermc.paper.registry.data.dialog.ActionButton>();
+        buttons.add(command("查验眼前矿面","realm sample"));buttons.add(command("派班采眼前矿面","realm minework "+pit.id()));
+        if(s.title(pit.title()).seal().equals(actor)){
+            buttons.add(command("签发经营特许","realm minegrantform "+pit.id()));
+            buttons.add(command("收回特许","realm minegrant "+pit.id()+" 收回"));
+        }
         show(p,"领地矿场 · "+pit.id(),List.of(text("所属领地　"+s.title(pit.title()).name()+"　｜　工作范围为坑口区块"),
-                text("在矿口木桶放铁镐，瞄准本区露出的天然矿面派一班。"),text("最近班次　"+(state==null?"待派工":state))),
-                List.of(),List.of(command("查验眼前矿面","realm sample"),command("派班采眼前矿面","realm minework "+pit.id())),2);
+                text("矿口须有实物铁镐。普通铁镐每处矿面磨损 10 点，新镐可采 25 班。铁砧加铁锭可维修。"),text("最近班次　"+(state==null?"待派工":state))),
+                List.of(),buttons,2);
     }
     private void tick(){
         if(Bukkit.getOnlinePlayers().isEmpty())return;
@@ -120,18 +142,33 @@ final class MineOffice {
         var cargo=new PorterCargo(npc,null);
         if(stage==0){
             if(!r.minerals.available(face)){
+                if(cargo.getItem(1)!=null){
+                    var home=approach(b);
+                    if(npc.getLocation().distanceSquared(home)>.85){walking.toward(npc,home,1);return;}
+                    require(bin.getInventory().addItem(cargo.getItem(1)).isEmpty(),"矿仓已满，等待归还工具");
+                    cargo.setItem(1,null);r.world.save(true);
+                }
                 s.update("UPDATE pit_shift SET stage=3,status='工作面已采，撤班' WHERE id=?",id);return;
             }
+            if(cargo.getItem(1)==null){
+                var home=approach(b);
+                if(npc.getLocation().distanceSquared(home)>.85){walking.toward(npc,home,1);return;}
+                int slot=bin.getInventory().first(Material.IRON_PICKAXE);require(slot>=0,"坑口缺铁镐");
+                var pick=bin.getInventory().getItem(slot);cargo.setItem(1,pick);
+                bin.getInventory().setItem(slot,null);r.world.save(true);
+            }
             var at=approach(face);require(at!=null,"工作面通路中断");
-            if(npc.getLocation().distanceSquared(at)>.85){walking.toward(npc,at,1);status(id,"步行前往工作面");return;}
-            int slot=bin.getInventory().first(Material.IRON_PICKAXE);require(slot>=0,"坑口缺铁镐");
-            var pick=bin.getInventory().getItem(slot);var wear=(Damageable)pick.getItemMeta();wear.setDamage(wear.getDamage()+1);pick.setItemMeta(wear);
+            if(npc.getLocation().distanceSquared(at)>.85){walking.toward(npc,at,1);status(id,"携镐前往工作面");return;}
             s.atomic(()->{r.minerals.claim(face);s.update("UPDATE pit_shift SET stage=1,status='采出待装' WHERE id=?",id);return null;});
-            bin.getInventory().setItem(slot,wear.getDamage()>=Material.IRON_PICKAXE.getMaxDurability()?null:pick);
             npc.swingMainHand();face.getWorld().playSound(face.getLocation(),Sound.BLOCK_STONE_BREAK,1f,.8f);
             stage=1;
         }
         if(stage==1){
+            if(npc.getPersistentDataContainer().getOrDefault(pickUsed,PersistentDataType.INTEGER,-1)!=id){
+                var pick=cargo.getItem(1);require(pick!=null && pick.getType()==Material.IRON_PICKAXE,"请复核本班现场铁镐");
+                cargo.setItem(1,ProductionTools.afterMineShift(pick));
+                npc.getPersistentDataContainer().set(pickUsed,PersistentDataType.INTEGER,id);
+            }
             if(MineralRegister.kind(face.getType())==kind)face.setType(Material.AIR);
             cargo.setItem(0,new ItemStack(MineralRegister.raw(kind)));r.world.save(true);
             s.update("UPDATE pit_shift SET stage=2,status='背矿回坑口' WHERE id=?",id);return;
@@ -141,9 +178,11 @@ final class MineOffice {
             if(npc.getLocation().distanceSquared(at)>.85){walking.toward(npc,at,1);return;}
             var held=cargo.getItem(0);require(held!=null && held.getType()==MineralRegister.raw(kind),"等候原班实货");
             require(bin.getSnapshotInventory().addItem(held.clone()).isEmpty(),"矿仓已满，等待卸货");
+            var pick=cargo.getItem(1);
+            if(pick!=null)require(bin.getSnapshotInventory().addItem(pick.clone()).isEmpty(),"请留一格归还铁镐");
             bin.getPersistentDataContainer().set(receipt,PersistentDataType.INTEGER,id);
             require(bin.update(false,false),"请修复坑口仓");
         }
-        cargo.setItem(0,null);r.world.save(true);s.update("UPDATE pit_shift SET stage=3,status='已交矿一份' WHERE id=?",id);
+        cargo.setItem(0,null);cargo.setItem(1,null);r.world.save(true);s.update("UPDATE pit_shift SET stage=3,status='已交矿一份' WHERE id=?",id);
     }
 }
