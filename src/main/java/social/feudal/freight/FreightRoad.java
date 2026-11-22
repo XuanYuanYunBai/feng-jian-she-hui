@@ -20,7 +20,7 @@ import static social.feudal.freight.FreightStore.*;
 
 // All methods run on Paper's server thread.
 final class FreightRoad {
-    record Goods(byte[] bytes, String material, int amount) {}
+    record Goods(byte[] bytes, String material, int amount, Integer relief) {}
     private record Cell(int x, int z) {}
     final RealmService realm;
     final HaulNetwork net;
@@ -29,10 +29,10 @@ final class FreightRoad {
     private final NamespacedKey station, receipt;
     private final Set<Cell> tickets = new HashSet<>();
     private final TransportCrew crews;
-    private final NamespacedKey consignment;
+    private final NamespacedKey consignment, relief;
 
     FreightRoad(Plugin plugin, World world,TransportCrew crews,RealmService realm) {
-        this.realm=realm;net=realm.roads;
+        relief=new NamespacedKey(plugin,"relief");this.realm=realm;net=realm.roads;
         this.crews=crews;consignment=new NamespacedKey(plugin,"consignment");
         this.plugin = plugin;
         this.world = world;
@@ -128,7 +128,12 @@ final class FreightRoad {
         Team team=team(r);
         if(stack.getAmount()>team.capacity())throw new IllegalArgumentException("本队每趟上限 "+team.capacity()+" 件，请分批或在起点升级装备");
         world.save(true);
-        return new Goods(stack.serializeAsBytes(), stack.getType().name(), stack.getAmount());
+        return new Goods(stack.serializeAsBytes(), stack.getType().name(), stack.getAmount(),stack.getPersistentDataContainer().get(relief,PersistentDataType.INTEGER));
+    }
+
+    boolean staged(Route route, byte[] cargo) {
+        var source=barrel(route.sx(),route.y(),route.sz(),route.sourceSeal());
+        return ItemStack.deserializeBytes(cargo).equals(source.getInventory().getItem(0));
     }
 
     // The slot and its receipt are written on the same barrel snapshot. Replay after a crash flushes an
@@ -239,7 +244,7 @@ final class FreightRoad {
         data.set(field(t.route(),"bill"),PersistentDataType.STRING,t.id());
         data.remove(field(t.route(),"approach"));
         putCargo(team,stack);
-        team.porter().customName(Component.text("货站脚夫 · "+goodsName(t.material())+" ×"+t.amount()));
+        team.porter().customName(Component.text((t.route().sea()?"货船船工":"货站脚夫")+" · "+goodsName(t.material())+" ×"+t.amount()));
         team.porter().getPersistentDataContainer().set(consignment,PersistentDataType.STRING,t.id());
         crews.active(team,true);
     }
@@ -271,6 +276,7 @@ final class FreightRoad {
         if(t.id().equals(team.porter().getPersistentDataContainer().get(consignment,PersistentDataType.STRING))){
             data.set(field(r,"bill"),PersistentDataType.STRING,t.id());return true;
         }
+        if(t.id().startsWith("relief."))throw new IllegalArgumentException("等候本段原班货物复核，请同时恢复货队与地籍检查点");
         if(t.amount()>team.capacity())throw new IllegalArgumentException("请先在起点为旧运单配足运力");
         inspect(r,step);inspect(r,next);
         if(!walk(r,team,next))return false;
@@ -278,7 +284,7 @@ final class FreightRoad {
         if(next<t.step())return false;
         carry(team,t,ItemStack.deserializeBytes(t.cargo()));world.save(true);return true;
     }
-    void rested(Team team){crews.active(team,false);team.halt();team.porter().customName(Component.text("货站 · 脚夫"));}
+    void rested(Route route,Team team){crews.active(team,false);team.halt();team.porter().customName(Component.text(route.sea()?"渡口 · 船工":"货站 · 脚夫"));}
     void release() {
         for (var c : tickets) world.removePluginChunkTicket(c.x, c.z, plugin);
         tickets.clear();

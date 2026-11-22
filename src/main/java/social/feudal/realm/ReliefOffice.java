@@ -67,9 +67,32 @@ final class ReliefOffice {
             String dest=s.value("SELECT dest FROM relief WHERE id=?",id);
             body.add(text("#"+id+"　"+r.manors.register.manor(dest).name()+"　"+s.number("SELECT quantity FROM relief WHERE id=?",id)+" 个面包　"+List.of("待备货","待封装","在途","已签收","已撤回").get(stage)));
             if(stage<=1 && !dest.equals(m.id()))buttons.add(command("本庄备货 #"+id,"realm relief "+m.id()+" 备货 "+id));
+            if(stage==2 || stage==3)buttons.add(command("联运进度 #"+id,"freight track "+id));
+            if(stage==2 && m.id().equals(s.value("SELECT source FROM relief WHERE id=?",id)))
+                buttons.add(command("安排联运 #"+id,"realm relayform "+id));
             if(dest.equals(m.id()) && stage==2)buttons.add(command("验货签收 #"+id,"realm relief "+m.id()+" 签收 "+id));
         }
         show(p,"跨庄赈济 · "+m.name(),body,List.of(),buttons,2);
+    }
+    String status(int id) throws SQLException {
+        String stage=s.value("SELECT stage FROM relief WHERE id=?",id);
+        require(stage!=null,"没有这张赈单");
+        return List.of("待备货","待封装","在途","已签收入粮","已撤回").get(Integer.parseInt(stage));
+    }
+    void checkRoute(int id, Player player, int quantity, social.feudal.transport.HaulNetwork.Point start,
+                    social.feudal.transport.HaulNetwork.Point end) throws SQLException {
+        try(var q=s.sql("SELECT source,dest,quantity,stage FROM relief WHERE id=?",id);var row=q.executeQuery()){
+            require(row.next() && row.getInt("stage")==2 && row.getInt("quantity")==quantity,"赈单须已封装，且整批数量一致");
+            var source=r.manors.register.manor(row.getString("source"));
+            var dest=r.manors.register.manor(row.getString("dest"));
+            require(r.manors.register.manages(source,player.getUniqueId().toString()),"联运须由供粮庄业主或该处公产持印人委托");
+            for(var m:List.of(source,dest)){
+                var point=m==source?start:end;
+                var bin=r.manors.foodBarrel(m);
+                require(bin!=null && bin.getX()==point.x() && bin.getY()==point.y() && bin.getZ()==point.z(),
+                        m.name()+"的厅仓必须是联运对应的首站或末站");
+            }
+        }
     }
     private void pack(Player p,SettlementRegister.Manor m,Container bin,int id,String actor)throws SQLException{
         require(r.manors.register.manages(m,actor),"须由供粮庄业主或公产持印人备货");

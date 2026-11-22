@@ -12,6 +12,34 @@ class FreightStoreTest {
     final Route road = new Route("mill", "world", -15, 75, 4, -17, 4, "source", "destination");
     final byte[] stack = { 1, 2, 3 };
 
+    @Test void relayKeepsItsManifestAcrossRestartAndRetry() throws Exception {
+        var file=temp.resolve("relay.sqlite");
+        var sea=new Route("sea","world",-17,75,4,-20,4,"destination","quay");
+        var wrong=new Route("wrong","world",-17,75,4,-20,4,"replacement","quay");
+        assertThrows(IllegalArgumentException.class,()->checkChain(java.util.List.of(road,wrong)));
+        assertThrows(IllegalArgumentException.class,()->checkChain(java.util.List.of(sea,road)));
+        try(var store=new FreightStore(file)){
+            store.register(road);store.register(sea);
+            store.relay(7,"sender",stack,2,java.util.List.of(road,sea));
+            assertThrows(SQLException.class,()->store.relay(7,"another",stack,2,java.util.List.of(road)));
+            var order=store.waybill(7);store.dispatch(order,order.legs().getFirst());
+            store.cancelUnloaded(store.active());
+        }
+        try(var store=new FreightStore(file)){
+            var order=store.waybill(7);
+            assertEquals(java.util.List.of(7),store.waitingRelays());
+            assertArrayEquals(stack,order.cargo());assertEquals(2,order.legs().size());
+            store.dispatch(order,order.legs().getFirst());store.loaded(store.active());
+            store.move(store.active());store.move(store.active());store.accept(store.active(),"货站交接");
+            store.delivered(store.active());
+            var resumed=store.waybill(7);
+            assertEquals("DELIVERED",resumed.legs().getFirst().phase());
+            assertNull(resumed.legs().getLast().phase());
+            store.setDispatchClosed(7,true);assertTrue(store.waitingRelays().isEmpty());
+            store.setDispatchClosed(7,false);assertEquals(java.util.List.of(7),store.waitingRelays());
+        }
+    }
+
     @Test void straightRoadUsesActualBlockPositions() {
         assertEquals(-16, road.x(1));
         assertEquals(4, road.z(1));

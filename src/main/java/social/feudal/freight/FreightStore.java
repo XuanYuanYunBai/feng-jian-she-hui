@@ -64,6 +64,8 @@ final class FreightStore implements AutoCloseable {
                     try(var alter=db.createStatement()){alter.execute("ALTER TABLE routes ADD COLUMN path TEXT");}
                 }
             }
+            st.execute("CREATE TABLE IF NOT EXISTS waybill(relief INTEGER PRIMARY KEY,sender TEXT NOT NULL,cargo BLOB NOT NULL,amount INTEGER NOT NULL CHECK(amount BETWEEN 1 AND 64),closed INTEGER NOT NULL DEFAULT 0)");
+            st.execute("CREATE TABLE IF NOT EXISTS waybill_leg(relief INTEGER REFERENCES waybill(relief),seq INTEGER,route TEXT NOT NULL REFERENCES routes(name),bill TEXT NOT NULL UNIQUE,PRIMARY KEY(relief,seq))");
             st.execute("CREATE TABLE IF NOT EXISTS crew_return(route TEXT PRIMARY KEY REFERENCES routes(name),step INTEGER NOT NULL)");
             st.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_cart ON trips((1)) WHERE phase NOT IN ('DELIVERED','CANCELLED')");
         } catch (SQLException e) { db.close(); throw e; }
@@ -134,6 +136,84 @@ final class FreightStore implements AutoCloseable {
                         r.getBytes("cargo"), r.getString("material"), r.getInt("amount"), Phase.valueOf(r.getString("phase")),
                         r.getInt("step"), r.getString("signer"), r.getString("delivered_at"));
             }
+        }
+    }
+
+    record RelayLeg(int number, Route route, String bill, String phase) {}
+    record Waybill(int relief, String sender, byte[] cargo, int amount, boolean closed, List<RelayLeg> legs) {}
+
+    static void checkChain(List<Route> routes) {
+        if (routes.isEmpty() || routes.size() > 8)
+            throw new IllegalArgumentException("联运须选择一至八段货线");
+        var seen = new java.util.HashSet<String>();
+        seen.add(routes.getFirst().sourceSeal());
+        Route previous = null;
+        for (Route route : routes) {
+            if (previous != null && (!previous.world().equals(route.world())
+                    || !previous.end().equals(route.start()) || !previous.destSeal().equals(route.sourceSeal())))
+                throw new IllegalArgumentException("换装须使用同一只登记站桶：" + route.name());
+            if (!seen.add(route.destSeal())) throw new IllegalArgumentException("联运线路重复经过同一货站");
+            previous = route;
+        }
+    }
+
+    void relay(int relief, String sender, byte[] cargo, int amount, List<Route> routes) throws SQLException {
+        checkChain(routes);
+        db.setAutoCommit(false);
+        try (var order = db.prepareStatement("INSERT INTO waybill(relief,sender,cargo,amount) VALUES(?,?,?,?)");
+             var leg = db.prepareStatement("INSERT INTO waybill_leg VALUES(?,?,?,?)")) {
+            order.setInt(1, relief); order.setString(2, sender); order.setBytes(3, cargo); order.setInt(4, amount);
+            order.executeUpdate();
+            for (int i = 0; i < routes.size(); i++) {
+                leg.setInt(1, relief); leg.setInt(2, i + 1); leg.setString(3, routes.get(i).name());
+                // Dots reserve an internal namespace distinct from player-chosen trip IDs.
+                leg.setString(4, "relief." + relief + "." + (i + 1)); leg.addBatch();
+            }
+            leg.executeBatch(); db.commit();
+        } catch (SQLException | RuntimeException ex) {
+            db.rollback(); throw ex;
+        } finally { db.setAutoCommit(true); }
+    }
+
+    Waybill waybill(int id) throws SQLException {
+        try (var order = db.prepareStatement("SELECT sender,cargo,amount,closed FROM waybill WHERE relief=?");
+             var legs = db.prepareStatement("""
+                SELECT seq,l.route,bill,t.phase FROM waybill_leg l LEFT JOIN trips t ON t.id=l.bill
+                WHERE l.relief=? ORDER BY seq""")) {
+            order.setInt(1,id); legs.setInt(1,id);
+            try (var r = order.executeQuery(); var rows = legs.executeQuery()) {
+                if (!r.next()) return null;
+                var items = new ArrayList<RelayLeg>();
+                while (rows.next()) items.add(new RelayLeg(rows.getInt(1),route(rows.getString(2)),rows.getString(3),rows.getString(4)));
+                return new Waybill(id,r.getString(1),r.getBytes(2),r.getInt(3),r.getBoolean(4),List.copyOf(items));
+            }
+        }
+    }
+
+    List<Integer> waitingRelays() throws SQLException {
+        var ids = new ArrayList<Integer>();
+        try (var q = db.createStatement(); var rows = q.executeQuery("""
+             SELECT DISTINCT l.relief FROM waybill_leg l JOIN waybill w ON w.relief=l.relief LEFT JOIN trips t ON t.id=l.bill
+             WHERE w.closed=0 AND (t.id IS NULL OR t.phase='CANCELLED') ORDER BY l.relief""")) {
+            while (rows.next()) ids.add(rows.getInt(1));
+        }
+        return ids;
+    }
+
+    void dispatch(Waybill w, RelayLeg leg) throws SQLException {
+        if (leg.phase()==null) {
+            book(leg.bill(),leg.route(),w.sender(),w.sender(),w.cargo(),"BREAD",w.amount());
+        } else {
+            try (var q=db.prepareStatement("UPDATE trips SET phase='LOADING' WHERE id=? AND phase='CANCELLED'")) {
+                q.setString(1,leg.bill());
+                if (q.executeUpdate()!=1) throw new SQLException("联运装货检查点已变化");
+            }
+        }
+    }
+
+    void setDispatchClosed(int id, boolean closed) throws SQLException {
+        try (var q=db.prepareStatement("UPDATE waybill SET closed=? WHERE relief=?")) {
+            q.setBoolean(1,closed); q.setInt(2,id); q.executeUpdate();
         }
     }
 

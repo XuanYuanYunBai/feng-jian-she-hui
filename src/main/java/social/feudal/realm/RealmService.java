@@ -74,6 +74,14 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         markers=new DepotMarkers(this);new SeatEnvoys(this);
         Objects.requireNonNull(plugin.getCommand("realm")).setExecutor(this);
     }
+    /** Verify the two real pantries and the authority commissioning a sealed relief consignment. */
+    public void checkReliefRoute(int id, Player player, int amount, social.feudal.transport.HaulNetwork.Point start, social.feudal.transport.HaulNetwork.Point end) throws SQLException {
+        relief.checkRoute(id, player, amount, start, end);
+    }
+    public String reliefStatus(int id) throws SQLException {
+        return relief.status(id);
+    }
+
     String solePersonalManor(Player p)throws SQLException{
         return store.value("SELECT min(id) FROM manor WHERE owner=? HAVING count(*)=1",p.getUniqueId().toString());
     }
@@ -146,6 +154,12 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 }
                 case "smith","mend" -> smiths.run(player(s),a);
                 case "relief" -> relief.run(player(s),a);
+                case "relayform" -> {
+                    usage(a.length==2,"relayform 赈单号");
+                    int id=Integer.parseInt(a[1]);
+                    DiplomacyDesk.form(player(s),"赈粮水陆联运 #"+id,"在供粮庄厅仓旁办理。按行程填写公共货线名，用空格分隔。已登记："+String.join("、",publicRoutes.keySet()),
+                        "freight relay "+id,List.of(new DiplomacyDesk.Field("routes","货线顺序","",327)));
+                }
                 case "reliefform" -> {
                     usage(a.length==2,"reliefform 庄园");DiplomacyDesk.form(player(s),"申请跨庄赈粮","按下季实缺填写面包量。","realm relief "+a[1]+" 申请",List.of(new DiplomacyDesk.Field("quantity","面包数量","1",2)));
                 }

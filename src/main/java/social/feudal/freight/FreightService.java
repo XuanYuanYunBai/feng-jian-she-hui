@@ -37,6 +37,8 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
     private volatile boolean closing;
     // Accessed only by the ledger worker.
     private String stopped = "";
+    private final java.util.Map<Integer,String> waiting=new java.util.HashMap<>();
+    private long lastDispatch;
     private String delayedTrip = "";
     private final boolean pauseWhenEmpty;
 
@@ -56,7 +58,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                     var returning=store.returning();
                     if(returning!=null){returnHome(returning);return;}
                     Trip t = store.active();
-                    if (t != null) tick(t);
+                    if (t != null) tick(t); else dispatchRelay();
                 } catch (Exception e) {
                     if (!closing) noteFailure(e);
                 } finally { ticking.set(false); }
@@ -92,7 +94,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             var team=road.team(r);
             if(!r.sea())road.realm.clearance(r.path().get(next),"返-"+trip.bill(),team);
             if(!road.walk(r,team,next))return false;
-            if(next==0){road.rested(team);road.release();}
+            if(next==0){road.rested(r,team);road.release();}
             return true;
         }))store.walkedBack(trip);
     }
@@ -120,6 +122,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             return true;
         });
         switch (t.phase()) {
+            case ARRIVED -> {
+                if (ready && t.id().startsWith("relief.")) store.accept(t,"货站交接");
+            }
             case LOADING -> {
                 if (ready) store.loaded(t);
                 else {
@@ -131,7 +136,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 if(!ready)return;
                 store.move(t);
                 main(() -> {
-                    if (next == r.length()) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.dy()
+                    if (next == r.length() && !t.id().startsWith("relief.")) notifyParty(t.recipient(), "货单 " + t.id() + " 已到 " + r.dx() + "," + r.dy()
                             + "," + r.dz() + "，请到站空手潜行右键签收");
                     return null;
                 });
@@ -173,6 +178,9 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                         Route r=store.route(key(args[1]));if(r==null)throw new IllegalArgumentException("货线不存在");
                         main(()->{road.equip(p,r,args[2]);return null;});yield "货站装备已登记";
                     }
+                    case "relay" -> relay(sender,party,args);
+                    case "track" -> track(sender,args);
+                    case "withdraw","resume" -> changeDispatch(party,args,action.equals("resume"));
                     case "send" -> book(sender, party, args);
                     case "accept" -> accept(sender, party, args);
                     case "status" -> status(args);
@@ -184,7 +192,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                 message = "货运：" + e.getMessage();
             }
             String reply = message;
-            if (!closing) plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage(reply));
+            if (!closing && !reply.isEmpty()) plugin.getServer().getScheduler().runTask(plugin, () -> sender.sendMessage(reply));
         });
         return true;
     }
@@ -243,9 +251,116 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
             nearby(sender, r.sx(), r.y(), r.sz());
             return road.manifest(r);
         });
+        if(goods.relief()!=null){
+            var w=store.waybill(goods.relief());
+            if(w!=null && !w.closed())throw new IllegalArgumentException("本批封粮已委托联运，请查阅赈单行程");
+        }
         store.book(id, r, party, recipient, goods.bytes(), goods.material(), goods.amount());
         stopped = "";
         return "已开货单 " + id + "，待装 " + goods.amount() + " " + FreightRoad.goodsName(goods.material());
+    }
+
+    private static int reliefId(String input) {
+        try {
+            int id=Integer.parseInt(input);
+            if(id>0)return id;
+        } catch(NumberFormatException ignored) { }
+        throw new IllegalArgumentException("请填写正整数赈单号");
+    }
+
+    private String relay(CommandSender sender,String party,String[] args) throws Exception {
+        if(!(sender instanceof Player p) || args.length<3 || args.length>10)
+            throw new IllegalArgumentException("用法 /freight relay 赈单号 货线一 [货线二 …]");
+        int id=reliefId(args[1]);
+        var routes=new ArrayList<Route>();
+        for(int i=2;i<args.length;i++){
+            var route=store.route(key(args[i]));
+            if(route==null)throw new IllegalArgumentException("没有这条公共货线："+args[i]);
+            routes.add(route);
+        }
+        checkChain(routes);
+        var existing=store.waybill(id);
+        if(existing!=null){
+            if(existing.sender().equals(party) && routes.equals(existing.legs().stream().map(RelayLeg::route).toList()))
+                return "赈单已有联运记录，请用 /freight track "+id+" 查阅";
+            throw new IllegalArgumentException("这张赈单已有联运记录");
+        }
+        var first=routes.getFirst();
+        var goods=main(()->{
+            nearby(sender,first.sx(),first.y(),first.sz());
+            var manifest=road.manifest(first);
+            if(!"BREAD".equals(manifest.material()) || !Integer.valueOf(id).equals(manifest.relief()))
+                throw new IllegalArgumentException("请将本赈单的整批封粮放在起点站桶第一格");
+            road.realm.checkReliefRoute(id,p,manifest.amount(),first.start(),routes.getLast().end());
+            return manifest;
+        });
+        store.relay(id,party,goods.bytes(),goods.amount(),routes);
+        return "已委托 "+routes.size()+" 段联运，赈单 #"+id+"。用 /freight track "+id+" 查验。";
+    }
+
+    // Only release the next leg once its predecessor durably unloaded into the same sealed barrel.
+    private void dispatchRelay() throws Exception {
+        if(System.nanoTime()-lastDispatch<1_000_000_000L)return;
+        lastDispatch=System.nanoTime();
+        for(int id:store.waitingRelays()){
+            var order=store.waybill(id);
+            if (!"在途".equals(main(()->road.realm.reliefStatus(id)))) {
+                store.setDispatchClosed(id,true); waiting.remove(id); continue;
+            }
+            var leg=order.legs().stream().filter(l->!"DELIVERED".equals(l.phase())).findFirst().orElseThrow();
+            try{
+                boolean staged=main(()->road.staged(leg.route(),order.cargo()));
+                if(!staged){waiting.put(id,"等待原批封粮放回该站第一格");continue;}
+                store.dispatch(order,leg);waiting.remove(id);return;
+            }catch(IllegalArgumentException ex){waiting.put(id,ex.getMessage());}
+        }
+    }
+
+    private String changeDispatch(String party,String[] args,boolean resume) throws Exception {
+        if(args.length!=2)throw new IllegalArgumentException("请填写赈单号");
+        var w=store.waybill(reliefId(args[1]));
+        if(w==null || !w.sender().equals(party))throw new IllegalArgumentException("须由原委托人办理");
+        if(w.legs().stream().noneMatch(l->l.phase()==null || "CANCELLED".equals(l.phase())))
+            throw new IllegalArgumentException("所有路段已发车");
+        if(resume && !"在途".equals(main(()->road.realm.reliefStatus(w.relief()))))
+            throw new IllegalArgumentException("这份赈单已经结清");
+        store.setDispatchClosed(w.relief(),!resume);waiting.remove(w.relief());
+        return resume?"已恢复派车，下一段须在原站取得原批封粮。":"已撤回后续派车。已启程的工班会把实货交到本段终点，可在那里亲取。";
+    }
+
+    private String track(CommandSender sender,String[] args) throws Exception {
+        if(args.length!=2)throw new IllegalArgumentException("用法 /freight track 赈单号");
+        int id=reliefId(args[1]);var order=store.waybill(id);
+        if(order==null)return "暂无联运委托；可由供粮庄在赈单选择「安排联运」。";
+        var lines=new ArrayList<String>();
+        String state=main(()->road.realm.reliefStatus(id));
+        lines.add("封粮 "+order.amount()+" 个　｜　赈单"+state);
+        boolean firstPending=true;
+        for(var leg:order.legs()){
+            var r=leg.route();String label="第 "+leg.number()+" 段　"+(r.sea()?"水运":"陆运")+" · "+r.name();
+            lines.add(label);
+            if("DELIVERED".equals(leg.phase()))lines.add("　已交仓　"+r.dx()+"，"+r.dy()+"，"+r.dz());
+            else if(firstPending){
+                firstPending=false;
+                if(leg.phase()==null || "CANCELLED".equals(leg.phase()))
+                    lines.add("　待装仓　"+r.sx()+"，"+r.y()+"，"+r.sz()+"　"+(order.closed()?"已撤回派车":waiting.getOrDefault(id,"等候工班")));
+                else lines.add("　"+describe(store.trip(leg.bill())));
+            }else lines.add(order.closed()?"　后续派车已撤回":"　等待前段交仓");
+        }
+        if(firstPending && state.equals("在途"))lines.add("末段已交仓，须由当地持印人到厅仓验货开封。");
+        if(sender instanceof Player p){
+            main(()->{
+                var body=lines.stream().map(s->text(s)).toList();
+                var buttons=new ArrayList<ActionButton>();
+                buttons.add(command("刷新行程","freight track "+id));
+                if(p.getUniqueId().toString().equals(order.sender()) && state.equals("在途")
+                        && order.legs().stream().anyMatch(l->l.phase()==null || "CANCELLED".equals(l.phase())))
+                    buttons.add(order.closed()?command("恢复后续派车","freight resume "+id):command("撤回后续派车","freight withdraw "+id));
+                show(p,"赈粮联运 #"+id,body,java.util.List.of(),buttons,1);return null;
+            });
+            return "";
+        }
+        return String.join("\n",lines);
     }
 
     private String accept(CommandSender sender, String party, String[] a) throws Exception {
@@ -337,7 +452,7 @@ public final class FreightService implements CommandExecutor, Listener, AutoClos
                         }
                         if (x==r.dx() && y==r.dy() && z==r.dz() && trip!=null && trip.route().equals(r)) {
                             body.add(text(description));
-                            if (trip.phase()==Phase.ARRIVED && party.equals(trip.recipient()))
+                            if (trip.phase()==Phase.ARRIVED && !trip.id().startsWith("relief.") && party.equals(trip.recipient()))
                                 buttons.add(command("签收货物","freight accept "+trip.id()));
                         }
                     }
