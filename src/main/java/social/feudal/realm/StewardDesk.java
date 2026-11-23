@@ -40,7 +40,7 @@ final class StewardDesk {
         body.add(text(heirs.isEmpty()?"家档尚无可接续的男性。成年代表可在居住庄议婚，婚后由父家开启养育。":"家档可接续 "+heirs.size()+" 人　首位 "+book.person(heirs.getFirst()).name()));
         buttons.add(command("婚书与养育","realm family 婚约"));buttons.add(command("生前核对继承","realm family 继承"));
         for(String t:titles)buttons.add(command("治领 · "+s.title(t).name(),"realm stewardship "+t));
-        buttons.add(command("商站与交易","realm commerce"));buttons.add(command("家族档案","realm family"));
+        buttons.add(command("公共养路簿","realm works"));buttons.add(command("商站与交易","realm commerce"));buttons.add(command("家族档案","realm family"));
         buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,"封建社会 · 经营簿",body,List.of(),buttons,2);
     }
@@ -108,7 +108,7 @@ final class StewardDesk {
         var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
         body.add(text(t.name()+"　"+t.rank()+"　｜　"+t.charter()+"\n治所区块 "+t.x()+"，"+t.z()));
         buttons.add(command("领地与居民","realm territory "+t.id()));buttons.add(command("领印与请爵","realm brief "+t.id()));
-        buttons.add(command("税仓账册","realm accounts"));
+        buttons.add(command("税仓账册","realm accounts"));buttons.add(command("公共养路簿","realm works"));
         boolean grantor=actor.equals(t.lawful()) && !t.charter().equals("流官");
         if(grantor && (Charters.sovereign(t)||t.rank().equals("公爵"))){
             for(String kind:Charters.sovereign(t)?List.of("公爵","流官"):List.of("伯爵"))

@@ -106,8 +106,19 @@ final class BlueAtlas implements Runnable {
                         .line(new Line(points)).centerPosition().depthTestEnabled(false).lineWidth(4)
                         .lineColor(new Color(route.sea()?0x46cdef:0xe99844,.95f)).build());
             }
+            var repairs=new MarkerSet("待办道路养护",true,true);
+            try(var q=s.sql("""
+                    SELECT w.id,w.route,w.x,w.y,w.z,w.bid,t.paid FROM road_work w
+                    LEFT JOIN trade t ON t.bid=w.bid WHERE w.result IS NULL""");var row=q.executeQuery()){
+                while(row.next()){
+                    String state=row.getObject("paid")!=null?"已购料待验":row.getObject("bid")==null?"待筹款":"收购中";
+                    repairs.put(row.getString("id"),POIMarker.builder().label("养路 #"+row.getInt("id")+" · "+state)
+                            .detail(escape(row.getString("route"))+" · 游戏内 /realm workdetail "+row.getInt("id"))
+                            .position(row.getInt("x")+.5,row.getInt("y")+1,row.getInt("z")+.5).defaultIcon().build());
+                }
+            }
             for(var map:world.getMaps()){
-                var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
+                var sets=map.getMarkerSets();sets.put("feudal-roadworks",repairs);sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
                 sets.put("feudal-offices",offices);sets.put("feudal-control",transfers);sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
                 sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-markets",markets);sets.put("feudal-ferries",ferries);
             }

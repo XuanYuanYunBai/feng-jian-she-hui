@@ -34,6 +34,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final WorkAllocation labor;
     final ReliefOffice relief;
     final SmithyOffice smiths;
+    final RoadWorks works;
     final CrossingOffice crossings;
     public final social.feudal.transport.HaulNetwork roads;
     public void clearance(social.feudal.transport.HaulNetwork.Point point,String bill,social.feudal.transport.TransportCrew.Team team)throws SQLException{
@@ -66,7 +67,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         fixtures=new WarehouseFixtures(this);
         taxes=new TaxOffice(this);
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
-        labor=new WorkAllocation(store,manors.register);rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);relief=new ReliefOffice(this);smiths=new SmithyOffice(this);
+        labor=new WorkAllocation(store,manors.register);rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);relief=new ReliefOffice(this);smiths=new SmithyOffice(this);works=new RoadWorks(this);
         Bukkit.getPluginManager().registerEvents(new ProductionTools(),plugin);
         firstHolding=new FirstHolding(this);steward=new StewardDesk(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
@@ -163,6 +164,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                         villages.enroll();s.sendMessage("已登记三处初始聚落。需要指定干地时使用 /realm foundingvillages 辖区代号 中心X 中心Z");
                     }
                 }
+                case "works","worksurvey","workdetail","workform","workfund","workaccept","workendform","workend" -> works.run(player(s),a);
                 case "smith","mend" -> smiths.run(player(s),a);
                 case "relief" -> relief.run(player(s),a);
                 case "relayform" -> {

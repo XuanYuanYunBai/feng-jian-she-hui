@@ -72,18 +72,28 @@ final class SmithyOffice {
         String state=s.value("SELECT status FROM smith_order WHERE manor=? ORDER BY id DESC LIMIT 1",m.id());
         show(p,m.name()+" · 铁匠铺",List.of(text("铁砧东设料桶、西设高炉，北侧留通道。一锭铁、一份木炭、四个本庄工时可打一份桥路铁件。"),
                 text("最近订单　"+(state==null?"尚未派工":state)),text("修路时瞄准已登记货线缺口的支撑面，主手持铁件，副手持木板。")),
-                List.of(),List.of(command("登记眼前铁砧","realm smith "+m.id()+" 登记"),command("派一班打铁","realm smith "+m.id()+" 派工"),command("修补眼前路面","realm mend")),2);
+                List.of(),List.of(command("登记眼前铁砧","realm smith "+m.id()+" 登记"),command("派一班打铁","realm smith "+m.id()+" 派工"),command("修补眼前路面","realm mend"),command("公共养路簿","realm works")),2);
     }
-    private void mend(Player p)throws SQLException{
+    ItemStack brace(){
+        var item=new ItemStack(Material.IRON_INGOT);
+        item.editMeta(meta->{meta.getPersistentDataContainer().set(brace,PersistentDataType.BYTE,(byte)1);meta.customName(Component.text("桥路铁件"));});
+        return item;
+    }
+    HaulNetwork.Point gap(Player p){
         var hit=p.rayTraceBlocks(5);require(hit!=null && hit.getHitBlock()!=null && hit.getHitBlockFace()!=null,"请瞄准缺口旁的支撑面");
         var b=hit.getHitBlock().getRelative(hit.getHitBlockFace());require(!b.equals(p.getLocation().getBlock()),"请站在缺口旁办理");var point=new HaulNetwork.Point(b.getX(),b.getY(),b.getZ());
         require(b.isEmpty() && r.publicRoutes.values().stream().anyMatch(route->!route.sea() && route.path().contains(point)),"请瞄准登记陆路缺口旁的支撑面");
+        return point;
+    }
+    private void mend(Player p)throws SQLException{
+        var point=gap(p);var b=r.roads.block(point);
         String title=s.owner(b.getX()>>4,b.getZ()>>4);require(title==null || s.title(title).seal().equals(p.getUniqueId().toString()),"领地工程须由本领实际持印人验收");
         var inv=p.getInventory();var iron=inv.getItemInMainHand();var wood=inv.getItemInOffHand();
         require(iron.getType()==Material.IRON_INGOT && iron.getItemMeta().getPersistentDataContainer().has(brace,PersistentDataType.BYTE) && Tag.PLANKS.isTagged(wood.getType()),"主手持锻造铁件，副手持木板");
         var material=wood.getType();b.setType(material,false);
         if(!r.roads.road(point)){b.setType(Material.AIR,false);throw new IllegalArgumentException("请先修好桥墩、邻侧桥面和通行净空");}
         iron.subtract();wood.subtract();inv.setItemInMainHand(iron);inv.setItemInOffHand(wood);
+        r.works.materials(p,point,material);
         p.sendMessage("消耗一份铁件和一块木板，路面已验通。");
     }
     private void tick(){
@@ -122,8 +132,7 @@ final class SmithyOffice {
             r.world.spawnParticle(Particle.CRIT,f.anvil.getLocation().add(.5,1,.5),8,.1,.1,.1);
             if(blows<2)s.update("UPDATE smith_order SET blows=blows+1 WHERE id=?",id);
             else{
-                var finished=new ItemStack(Material.IRON_INGOT);
-                finished.editMeta(meta->{meta.getPersistentDataContainer().set(brace,PersistentDataType.BYTE,(byte)1);meta.customName(Component.text("桥路铁件"));});
+                var finished=brace();
                 bag.setItem(0,finished);r.world.save(true);s.update("UPDATE smith_order SET stage=2,blows=3,status='搬运铁件' WHERE id=?",id);
             }
             return;

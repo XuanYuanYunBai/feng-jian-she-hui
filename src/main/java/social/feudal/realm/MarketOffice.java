@@ -26,7 +26,7 @@ final class MarketOffice implements Listener {
     private final MarketBids bids;
     private final NamespacedKey market,receipt,vendor,buyer;
     private static final Map<String,Material> GOODS=Map.of("小麦",Material.WHEAT,"原木",Material.OAK_LOG,
-            "羊毛",Material.WHITE_WOOL,"皮革",Material.LEATHER,"干草",Material.HAY_BLOCK,"铜锭",Material.COPPER_INGOT,"铁锭",Material.IRON_INGOT);
+            "羊毛",Material.WHITE_WOOL,"皮革",Material.LEATHER,"干草",Material.HAY_BLOCK,"铜锭",Material.COPPER_INGOT,"铁锭",Material.IRON_INGOT,"桥路铁件",Material.IRON_INGOT);
     MarketOffice(RealmService realm)throws SQLException{
         this.realm=realm;s=realm.store;market=new NamespacedKey(realm.plugin,"market_stall");receipt=new NamespacedKey(realm.plugin,"trade_receipt");
         vendor=new NamespacedKey(realm.plugin,"offering_seller");buyer=new NamespacedKey(realm.plugin,"stall_owner");
@@ -41,7 +41,7 @@ final class MarketOffice implements Listener {
             return realm.world.getBlockAt(r.getInt(1),r.getInt(2),r.getInt(3));
         }
     }
-    private Barrel at(Player p,String id)throws SQLException{
+    Barrel at(Player p,String id)throws SQLException{
         Block b=location(id);
         require(p.getWorld()==b.getWorld() && p.getLocation().distanceSquared(b.getLocation())<=36,"须在商站六格内交割");
         require(b.getState() instanceof Barrel barrel && id.equals(barrel.getPersistentDataContainer().get(market,PersistentDataType.STRING)),"商站柜桶已拆除或迁移");
@@ -59,7 +59,7 @@ final class MarketOffice implements Listener {
         });
         if(changed)realm.changed();
     }
-    private ItemStack goods(MarketBids.Offer o){return new ItemStack(GOODS.get(o.goods()),o.lot());}
+    private ItemStack goods(MarketBids.Offer o){return o.goods().equals("桥路铁件")?realm.smiths.brace().asQuantity(o.lot()):new ItemStack(GOODS.get(o.goods()),o.lot());}
     private ItemStack ownerLot(MarketBids.Offer o){return o.ask()?goods(o):o.currency().stack(o.price());}
     private static boolean enough(ItemStack actual,ItemStack required){
         return actual!=null && actual.isSimilar(required) && actual.getAmount()>=required.getAmount();
@@ -149,7 +149,7 @@ final class MarketOffice implements Listener {
                 usage(a.length==2,a[0]+" 商站");boolean ask=a[0].equals("askform");
                 DiplomacyDesk.form(p,ask?"张贴出售单":"张贴收购单","第二格先备一批"+(ask?"现货":"钱币")+"。随市按全服实际成交折银定价，无成交时采用业主填写的金额。",
                         "realm "+(ask?"ask":"bid")+" "+a[1], List.of(
-                        new DiplomacyDesk.Field("goods","小麦、原木、羊毛、皮革、干草、铜锭或铁锭","小麦",8),
+                        new DiplomacyDesk.Field("goods","小麦、原木、羊毛、皮革、干草、铜锭、铁锭或桥路铁件","小麦",8),
                         new DiplomacyDesk.Field("lot","每批件数","8",2),new DiplomacyDesk.Field("price",ask?"每批金额（随市最低）":"每批金额（随市最高）","2",2),
                         new DiplomacyDesk.Field("lots","批数","4",4),new DiplomacyDesk.Field("coin","支付币种（金或银）","银",2),
                         new DiplomacyDesk.Field("mode","固定或随市","固定",2)));
@@ -163,13 +163,7 @@ final class MarketOffice implements Listener {
                 var currency=a.length>=7?TollCoin.parse(a[6]):TollCoin.GOLD;
                 require(a.length<8 || Set.of("固定","随市").contains(a[7]),"定价方式请选择固定或随市");
                 boolean floating=a.length==8 && a[7].equals("随市");
-                s.atomic(()->{
-                    s.update("INSERT INTO bid(stall,goods,lot,price,remaining,currency,ask,floating) VALUES(?,?,?,?,?,?,?,?)",
-                            a[1],a[2],lot,limit,lots,currency.name(),ask?1:0,floating?1:0);
-                    require(enough(bin.getSnapshotInventory().getItem(1),ownerLot(bids.offer(s.number("SELECT last_insert_rowid()")))),
-                            ask?"第二格须有至少一批现货":"商站第二格须有至少一批实付"+currency.label);
-                    return null;
-                });
+                s.atomic(()->post(bin,a[1],a[2],lot,limit,lots,currency,ask,floating));
                 realm.changed();page(p,a[1],1);
             }
             case "unlist" -> {
@@ -179,6 +173,15 @@ final class MarketOffice implements Listener {
             }
             case "sell","buy" -> settle(p,a);
         }
+    }
+    // Called inside the transaction that also records the purpose of the purchase.
+    int post(Barrel bin,String site,String goods,int lot,int price,int lots,TollCoin coin,boolean ask,boolean floating)throws SQLException{
+        s.update("INSERT INTO bid(stall,goods,lot,price,remaining,currency,ask,floating) VALUES(?,?,?,?,?,?,?,?)",
+                site,goods,lot,price,lots,coin.name(),ask?1:0,floating?1:0);
+        int id=s.number("SELECT last_insert_rowid()");
+        require(enough(bin.getSnapshotInventory().getItem(1),ownerLot(bids.offer(id))),
+                ask?"第二格须有至少一批现货":"商站第二格须有至少一批实付"+coin.label);
+        return id;
     }
     private String funding(MarketBids.Offer offer){
         if(offer.remaining()==0)return "本单已结";
