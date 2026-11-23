@@ -11,6 +11,7 @@ final class FiscalLedger {
     record Crate(String id,String depot,String title,int amount,String carrier,boolean received){}
     private final RealmStore s;
     private final int chunksPerStep;
+    final TaxRemissions remissions;
     FiscalLedger(RealmStore store)throws SQLException{this(store,1);}
     FiscalLedger(RealmStore store,int chunksPerStep)throws SQLException{
         require(chunksPerStep>=1 && chunksPerStep<=64,"税距步长须为 1–64 区块");
@@ -32,6 +33,7 @@ final class FiscalLedger {
         s.update("CREATE TABLE IF NOT EXISTS parcel(id TEXT PRIMARY KEY REFERENCES crate(id),automatic INTEGER NOT NULL,staged INTEGER NOT NULL DEFAULT 0)");
         s.update("CREATE TABLE IF NOT EXISTS visit(title TEXT REFERENCES title(id),period INTEGER,grain INTEGER NOT NULL,PRIMARY KEY(title,period))");
         s.update("CREATE TABLE IF NOT EXISTS tax_right(depot TEXT PRIMARY KEY REFERENCES depot(id),title TEXT REFERENCES title(id))");
+        remissions=new TaxRemissions(store,this);
     }
     static int rate(int steps){return Math.max(0,100-25*Math.max(0,Math.min(steps,7)-3));}
     String right(RealmStore.Depot d)throws SQLException{
@@ -49,13 +51,14 @@ final class FiscalLedger {
         s.atomic(()->{
             require(period==period() || period==period()+1,"税期须连续");
             if(period>period())s.update("INSERT OR REPLACE INTO setting VALUES('seconds',0)");
+            remissions.expireBefore(period);
             for(var d:s.depots()){
                 if(s.number("SELECT v FROM setting WHERE k=?","first:"+d.id())>period)continue;
-                int due=tendered==null?d.yield():tendered.getOrDefault(d.id(),0);
-                if(due==0)continue;
+                int gross=tendered==null?d.yield():tendered.getOrDefault(d.id(),0);
+                if(gross==0 || s.number("SELECT count(*) FROM assessment WHERE depot=? AND period=?",d.id(),period)>0)continue;
+                int due=gross-remissions.settle(d,period,gross);
                 String title=right(d);
-                if(s.update("INSERT OR IGNORE INTO assessment(depot,period,title,due) VALUES(?,?,?,?)",
-                        d.id(),period,title,due)==0)continue;
+                s.update("INSERT INTO assessment(depot,period,title,due) VALUES(?,?,?,?)",d.id(),period,title,due);
                 var seat=s.title(title);
                 int steps=Math.abs(seat.x()-d.x())+Math.abs(seat.z()-d.z());
                 int amount=(int)((long)due*rate(Math.ceilDiv(steps,chunksPerStep))/100);

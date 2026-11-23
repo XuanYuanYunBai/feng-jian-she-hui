@@ -183,7 +183,9 @@ final class TaxOffice {
                 for(var d:realm.store.depots()){
                     if(realm.store.value("SELECT title FROM assessment WHERE depot=? AND period=?",d.id(),period)==null)continue;
                     var row=ledger.account(d.id(),period);if(!canRead(s,row.title()))continue;
-                    s.sendMessage(d.name()+" · 应收 "+row.due()+"  自动份额 "+ledger.quota(d.id(),period)+"  尚待装箱 "+row.remaining());
+                    var w=ledger.remissions.latest(d.id(),period);
+                    String retained=w!=null && w.state().equals("已减征")?"  减征留乡 "+w.spared():"";
+                    s.sendMessage(d.name()+retained+" · 应收 "+row.due()+"  自动份额 "+ledger.quota(d.id(),period)+"  尚待装箱 "+row.remaining());
                 }
             }
             case "treasury" -> {usage(a.length==2,"treasury 头衔ID");var t=realm.store.title(a[1]);require(canRead(s,t.id()),"公库仅向本领持印人开放");s.sendMessage(t.name()+"公库 · "+balance(t));}

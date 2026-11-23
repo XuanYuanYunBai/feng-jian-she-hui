@@ -160,6 +160,27 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                     DiplomacyDesk.form(player(s),"赈粮水陆联运 #"+id,"在供粮庄厅仓旁办理。按行程填写公共货线名，用空格分隔。已登记："+String.join("、",publicRoutes.keySet()),
                         "freight relay "+id,List.of(new DiplomacyDesk.Field("routes","货线顺序","",327)));
                 }
+                case "reliefdepots" -> {usage(a.length==2,"reliefdepots 赈单号");dialogs.reliefDepots(player(s),Integer.parseInt(a[1]));}
+                case "remitform" -> {
+                    usage(a.length==4,"remitform 赈单号 税仓 税期");
+                    var depot=taxes.ledger.depot(a[2]);
+                    DiplomacyDesk.form(player(s),"拟定减征 · "+depot.name(),"请输入减征比例（1–100）。按实缴小麦向下取整，余下应税份额仍按税距分配。",
+                        "realm remit "+Integer.parseInt(a[1])+" "+depot.id()+" "+Integer.parseInt(a[3]),
+                        List.of(new DiplomacyDesk.Field("percent","减征百分比","50",3)));
+                }
+                case "remit" -> {
+                    usage(a.length==5,"remit 赈单号 税仓 税期 减征百分比");var p=player(s);inWorld(p);
+                    var office=taxes.ledger.remissions;
+                    int id=office.propose(Integer.parseInt(a[1]),a[2],Integer.parseInt(a[3]),Integer.parseInt(a[4]),p.getUniqueId().toString());
+                    dialogs.remission(p,office.get(id));
+                }
+                case "writ","cosign","revokewrit" -> {
+                    usage(a.length==2,a[0]+" 减征令号");var p=player(s);inWorld(p);
+                    int id=Integer.parseInt(a[1]);var office=taxes.ledger.remissions;
+                    if(a[0].equals("cosign"))office.sign(id,p.getUniqueId().toString());
+                    if(a[0].equals("revokewrit"))office.revoke(id,p.getUniqueId().toString());
+                    dialogs.remission(p,office.get(id));
+                }
                 case "reliefform" -> {
                     usage(a.length==2,"reliefform 庄园");DiplomacyDesk.form(player(s),"申请跨庄赈粮","按下季实缺填写面包量。","realm relief "+a[1]+" 申请",List.of(new DiplomacyDesk.Field("quantity","面包数量","1",2)));
                 }

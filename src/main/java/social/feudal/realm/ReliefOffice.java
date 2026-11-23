@@ -66,6 +66,13 @@ final class ReliefOffice {
             int id=Integer.parseInt(key);int stage=s.number("SELECT stage FROM relief WHERE id=?",id);
             String dest=s.value("SELECT dest FROM relief WHERE id=?",id);
             body.add(text("#"+id+"　"+r.manors.register.manor(dest).name()+"　"+s.number("SELECT quantity FROM relief WHERE id=?",id)+" 个面包　"+List.of("待备货","待封装","在途","已签收","已撤回").get(stage)));
+            if(stage<3 && dest.equals(m.id())){
+                String district=r.taxes.ledger.remissions.district(id,true);
+                if(district!=null && s.title(district).seal().equals(actor))
+                    buttons.add(command("按本赈单拟减征 #"+id,"realm reliefdepots "+id));
+            }
+            for(String writ:r.diplomacy.column("SELECT id FROM tax_remission WHERE relief=? ORDER BY id DESC LIMIT 3",id))
+                buttons.add(command("查减征令 #"+writ,"realm writ "+writ));
             if(stage<=1 && !dest.equals(m.id()))buttons.add(command("本庄备货 #"+id,"realm relief "+m.id()+" 备货 "+id));
             if(stage==2 || stage==3)buttons.add(command("联运进度 #"+id,"freight track "+id));
             if(stage==2 && m.id().equals(s.value("SELECT source FROM relief WHERE id=?",id)))

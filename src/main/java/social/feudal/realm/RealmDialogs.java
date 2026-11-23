@@ -105,6 +105,38 @@ final class RealmDialogs {
                 List.of(), buttons, 2);
     }
 
+    void reliefDepots(Player p,int relief)throws SQLException {
+        var f=realm.taxes.ledger;
+        String land=f.remissions.district(relief,true);
+        RealmStore.require(land!=null && realm.store.title(land).seal().equals(p.getUniqueId().toString()),"请由未结赈单所在领地持印人拟令");
+        var buttons=new ArrayList<ActionButton>();
+        for(var depot:realm.store.depots()){
+            if(land.equals(realm.store.owner(depot.x(),depot.z())))
+                buttons.add(command(depot.name(),"realm remitform "+relief+" "+depot.id()+" "+(f.period()+1)));
+        }
+        show(p,"赈单 #"+relief+" · 地方减征",List.of(text(buttons.isEmpty()?"本领尚无登记税仓。":"选择本领税仓，减征只对下一税期有效。")),List.of(),buttons,2);
+    }
+
+    void remission(Player p,TaxRemissions.Writ w)throws SQLException {
+        var fiscal=realm.taxes.ledger;
+        var body=new ArrayList<DialogBody>();
+        var buttons=new ArrayList<ActionButton>();
+        var local=realm.store.title(w.land());var right=realm.store.title(w.right());
+        body.add(text(fiscal.depot(w.depot()).name()+"　｜　第 "+w.period()+" 税期　｜　"+w.state()));
+        body.add(text("关联赈单 #"+w.relief()+"　减征 "+w.percent()+"%"));
+        body.add(text("地方领印　"+local.name()+"　拟令人　"+realm.display(w.issuer())));
+        body.add(text("税收收益权　"+right.name()+"　会签人　"+(w.signer()==null?"尚无":realm.display(w.signer()))));
+        if(w.state().equals("已减征"))body.add(text("本期留在产地　"+w.spared()+" 份小麦。运去磨坊后仍须磨粉制饼，居民才能食用。"));
+        String who=p.getUniqueId().toString();
+        if(w.period()==fiscal.period()+1 && w.state().equals("待会签") && who.equals(right.seal()))
+            buttons.add(command("以税权持印人身份会签","realm cosign "+w.id()));
+        if(w.period()==fiscal.period()+1 && (w.state().equals("待会签") || w.state().equals("已核准"))
+                && (who.equals(local.seal()) || who.equals(right.seal())))
+            buttons.add(command("撤回此令","realm revokewrit "+w.id()));
+        buttons.add(command("查看该期税仓账","realm accounts "+w.depot()+" "+w.period()));
+        show(p,"减征令 #"+w.id(),body,List.of(),buttons,2);
+    }
+
     void accounts(Player p, int period, String id) throws SQLException {
         var f = realm.taxes.ledger;
         var d = f.depot(id);
@@ -118,10 +150,17 @@ final class RealmDialogs {
         } else {
             var a = f.account(id,period);
             int received=realm.store.number("SELECT sum(amount) FROM crate WHERE depot=? AND period=? AND received=1",id,period);
+            var reduction=f.remissions.latest(id,period);
+            if(reduction!=null && reduction.state().equals("已减征"))
+                body.add(text("盘得应税 "+(a.due()+reduction.spared())+"　｜　减征留乡 "+reduction.spared()+"　｜　净应收 "+a.due()));
             body.add(text("应收小麦　"+a.due()+" 份　｜　税箱已交割　"+received+" 份"));
             body.add(text("本期可委托驮运　"+f.quota(id,period)+" 份　｜　尚待装箱　"+a.remaining()+" 份"));
             body.add(text("期初税权　"+realm.store.title(a.title()).name()+"\n持印人可在发运前提走本地全部税箱。"));
             buttons.add(command("从本仓提运","realm collect "+id+" "+period));
+        }
+        for(var which:period==f.period()?List.of(period,period+1):List.of(period)){
+            var w=f.remissions.latest(id,which);
+            if(w!=null)buttons.add(command("第 "+which+" 期减征令 · "+w.state(),"realm writ "+w.id()));
         }
         var stock=realm.fixtures.lookup(d.x(),d.z(),"stock",id);
         if(stock!=null)body.add(text("产地仓箱　"+stock.getX()+"，"+stock.getY()+"，"+stock.getZ()));
