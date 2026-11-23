@@ -71,7 +71,7 @@ final class FamilyLivelihood {
         require(s.update("UPDATE family_guest SET settlers=100 WHERE guest=? AND manor=? AND host=? AND host=(SELECT owner FROM manor WHERE id=?)",guest,home,book.account(f),home)==1,"须由本庄业主为已受邀家族拨户");
     }
     void arrive(int family,int rep,String manor)throws SQLException{
-        require(canStay(family,manor),"须先取得主人签发的寄居文书");var old=book.person(rep).home();
+        require(!book.inTransit(rep),"请先在途中接回并办结陪迁");require(canStay(family,manor),"须先取得主人签发的寄居文书");var old=book.person(rep).home();
         require(!manor.equals(old),"已经在本庄居住");
         s.atomic(()->{
             if(old==null)require(realm.families.life.freeResidents(manor)>0,"庄内没有可具名的居民名额");

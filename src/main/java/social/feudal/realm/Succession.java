@@ -8,6 +8,7 @@ final class Succession {
     static final String VACANT="待任";
     private final RealmStore s;
     private final Charters law;
+    FamilyRegister families;
     private final FiscalLedger fiscal;
     Succession(RealmStore s,Charters law,FiscalLedger fiscal)throws SQLException{
         this.s=s;this.law=law;this.fiscal=fiscal;
@@ -90,6 +91,12 @@ final class Succession {
             }
             String heir=s.value("SELECT heir FROM office WHERE id=?",id);
             require(heir!=null,"请先登记暂管人或家产继承人");
+            if(families!=null){
+                int holder=families.rep(families.family(actor));
+                int next=heir.startsWith("族人·")?Integer.parseInt(heir.substring(3)):families.rep(families.family(heir));
+                require(holder!=0 && families.lineage.titleHeirs(holder,id).contains(next),"原提名已失效，请依本领继承法重新提名");
+                heir=families.actorFor(next);
+            }
             capacity(t,heir);
             if(t.charter().equals("收益封契") || s.number("SELECT hereditary FROM office WHERE id=?",id)==1){
                 install(id,heir);record(id,"依文书继任");

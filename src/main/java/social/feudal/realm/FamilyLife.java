@@ -9,15 +9,16 @@ final class FamilyLife {
     private final FamilyRegister book;
     private final RealmStore s;
     private final java.util.function.IntSupplier annualRoll;
-    FamilyLife(FamilyRegister book){this(book,()->java.util.concurrent.ThreadLocalRandom.current().nextInt(4));}
-    FamilyLife(FamilyRegister book,java.util.function.IntSupplier roll){this.book=book;s=book.s;annualRoll=roll;}
+    private final java.util.function.BooleanSupplier maleBirth;
+    FamilyLife(FamilyRegister book){this(book,()->java.util.concurrent.ThreadLocalRandom.current().nextInt(4),()->java.util.concurrent.ThreadLocalRandom.current().nextBoolean());}
+    FamilyLife(FamilyRegister book,java.util.function.IntSupplier roll,java.util.function.BooleanSupplier maleBirth){this.book=book;s=book.s;annualRoll=roll;this.maleBirth=maleBirth;}
     int freeResidents(String home)throws SQLException{
         return s.number("SELECT residents-(SELECT count(*) FROM kin WHERE home=manor.id AND death IS NULL) FROM manor WHERE id=?",home);
     }
     void settle(int family,int person,String manor)throws SQLException{
         book.own(family,person);
         require(s.number("SELECT count(*) FROM manor WHERE id=? AND owner=?",manor,book.account(family))==1,"只能在本家私庄安家");
-        require(book.person(person).home()==null && freeResidents(manor)>0,"须为尚未落籍的成员，并有未具名居民名额");
+        require(!book.inTransit(person) && book.person(person).home()==null && freeResidents(manor)>0,"须为尚未落籍的成员，并有未具名居民名额");
         s.update("UPDATE kin SET home=? WHERE id=?",manor,person);
     }
     private void eligible(int id,String home)throws SQLException{
@@ -36,22 +37,27 @@ final class FamilyLife {
             UNION SELECT k.other FROM kin k JOIN parents p ON k.id=p.id WHERE k.other IS NOT NULL)
             SELECT count(*) FROM parents WHERE id=?""",id,possible)>0;
     }
-    int marriage(int family,int a,int b,String home,boolean otherHouse,int dowry,int support)throws SQLException{
+    int marriage(int family,int a,int b,String home,int dowry,int support)throws SQLException{
         return s.atomic(()->{
             book.own(family,a);eligible(a,home);
             require(dowry>=0 && dowry<=64 && support>=0 && support<=64,"银币数量限 0–64");
             boolean local=b==0;int partner=b;
             if(local){
-                require(freeResidents(home)>0 && !otherHouse && dowry==0,"地方婚配须有本地人，初约免嫁资、子女入本家");
-                partner=book.addPerson(family,"乡人"+(1+s.number("SELECT max(id) FROM kin")),book.season()-25*4,home,null,null,null);
+                require(freeResidents(home)>0 && dowry==0,"地方婚配须有本地居民名额，初约免嫁资");
+                int next=1+s.number("SELECT max(id) FROM kin");
+                int house=book.lineage.newLocalHouse(next);
+                partner=book.addPerson(house,"乡人"+next,book.season()-25*4,home,null,null,null,book.person(a).sex().equals("男")?"女":"男");
             }else{
                 // Non-local parties meet in person to sign. Family and domicile never move on signature.
                 var p=book.person(partner);require(p.home()!=null,"对方须先落籍");eligible(partner,p.home());
+                require(!p.sex().equals(book.person(a).sex()),"须登记父家与母家");
                 require(p.family()!=family && !closeKin(book.person(a),p),"须与不同家族的非近亲议婚");
             }
             s.update("INSERT INTO family_match(a,b,children,home,dowry,support,state) VALUES(?,?,?,?,?,?,?)",
-                a,partner,otherHouse?book.person(partner).family():family,home,dowry,support,local?"已婚":"议婚");
-            return s.number("SELECT last_insert_rowid()");
+                a,partner,book.person(a).sex().equals("男")?family:book.person(partner).family(),home,dowry,support,local?"已婚":"议婚");
+            int match=s.number("SELECT last_insert_rowid()");
+            s.update("INSERT INTO marriage_parties VALUES(?,?,?)",match,family,book.person(partner).family());
+            return match;
         });
     }
     void sign(int family,int match)throws SQLException{
@@ -60,14 +66,14 @@ final class FamilyLife {
         require(s.update("UPDATE family_match SET state='已婚' WHERE id=? AND state='议婚'",match)==1,"婚约已办理");
     }
     void raising(int f,int match,boolean on)throws SQLException{
-        require(s.update("UPDATE family_match SET raising=? WHERE id=? AND children=? AND state='已婚'",on?1:0,match,f)==1,"须由约定子女入籍的一家办理");
+        require(s.update("UPDATE family_match SET raising=? WHERE id=? AND (children=? OR (children IN (SELECT family FROM ai_house) AND a IN (SELECT id FROM kin WHERE family=?))) AND state='已婚'",on?1:0,match,f,f)==1,"须由约定子女入籍的一家办理");
     }
     void yearAt(String manor,int season,int births)throws SQLException{
         if(season%4!=0)return;
         int year=season/4;
         var list=book.ids("""
             SELECT m.id FROM family_match m JOIN kin a ON a.id=m.a JOIN kin b ON b.id=m.b
-            WHERE m.state='已婚' AND m.raising=1 AND m.home=? AND a.home=m.home AND b.home=m.home
+            WHERE m.state='已婚' AND m.raising=1 AND a.sex<>b.sex AND m.home=? AND a.home=m.home AND b.home=m.home
             AND a.death IS NULL AND b.death IS NULL AND (m.last_year IS NULL OR m.last_year<?) ORDER BY m.id""",manor,year);
         for(int id:list){
             s.update("UPDATE family_match SET last_year=? WHERE id=?",year,id);
@@ -75,7 +81,8 @@ final class FamilyLife {
             int a=s.number("SELECT a FROM family_match WHERE id=?",id),b=s.number("SELECT b FROM family_match WHERE id=?",id);
             int f=s.number("SELECT children FROM family_match WHERE id=?",id);
             int number=s.number("SELECT count(*) FROM kin WHERE parent=? AND other=?",a,b)+1;
-            int child=book.addPerson(f,"子嗣"+number,season,manor,a,b,null);
+            String sex=maleBirth.getAsBoolean()?"男":"女";
+            int child=book.addPerson(f,(sex.equals("男")?"儿子":"女儿")+number,season,manor,a,b,null,sex);
             int parent=book.person(a).family()==f?a:b;
             s.update("UPDATE kin SET branch=(SELECT branch FROM kin WHERE id=?) WHERE id=?",parent,child);
             births--; // This child names one actual birth already recorded in population_season.

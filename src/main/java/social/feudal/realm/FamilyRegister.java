@@ -6,13 +6,14 @@ import static social.feudal.realm.RealmStore.require;
 
 /** People survive account logouts. Only the current representative can exercise a personal seal. */
 final class FamilyRegister {
-    record Person(int id,int family,String name,int birth,String home,int branch,int parent,int other,int sibling,boolean alive) {
+    record Person(int id,int family,String name,int birth,String home,int branch,int parent,int other,int sibling,boolean alive,String sex) {
         int age(int season){return Math.max(0,Math.floorDiv(season-birth,4));}
     }
     record Right(String kind,String key,String name,String destination,String basis) {}
     static final List<String> LAWS=List.of("普通分割","优先分割","联盟分割","长嗣","幼嗣","年长者");
     final RealmStore s;
     final FamilyHoldings holdings;
+    final FamilyLineage lineage;
 
     FamilyRegister(RealmStore store)throws SQLException{
         s=store;
@@ -42,6 +43,26 @@ final class FamilyRegister {
         s.update("CREATE TABLE IF NOT EXISTS family_steward(person INTEGER PRIMARY KEY REFERENCES kin(id),manor TEXT REFERENCES manor(id),kind TEXT,issuer TEXT,UNIQUE(manor,kind))");
         s.update("CREATE TABLE IF NOT EXISTS family_notice(person INTEGER PRIMARY KEY REFERENCES kin(id))");
         s.update("CREATE TABLE IF NOT EXISTS family_guard(ward INTEGER PRIMARY KEY REFERENCES kin(id),guardian INTEGER REFERENCES kin(id))");
+        s.update("CREATE TABLE IF NOT EXISTS family_journey(person INTEGER PRIMARY KEY REFERENCES kin(id),family INTEGER UNIQUE REFERENCES family(id),source TEXT,dest TEXT,escort INTEGER REFERENCES kin(id),x INTEGER,y INTEGER,z INTEGER)");
+        s.update("CREATE TABLE IF NOT EXISTS family_pending(family INTEGER PRIMARY KEY REFERENCES family(id),predecessor INTEGER REFERENCES kin(id))");
+        lineage=new FamilyLineage(this);
+        s.atomic(()->{
+            for(int f:ids("SELECT f.id FROM family f JOIN kin k ON k.id=f.rep WHERE f.ended IS NULL AND k.sex='女'")){
+                int old=rep(f);String holder=account(f),token=personal(old);
+                syncAssets(holder,old);
+                s.update("UPDATE title SET lawful=CASE WHEN lawful=? THEN ? ELSE lawful END,seal=CASE WHEN seal=? THEN ? ELSE seal END WHERE lawful=? OR seal=?",holder,token,holder,token,holder,holder);
+                for(var pair:List.of(new String[]{"庄产","manor"},new String[]{"商站","stall"}))
+                    s.update("UPDATE "+pair[1]+" SET owner=? WHERE owner=? AND id IN (SELECT asset FROM family_asset WHERE kind=? AND person=?)",token,holder,pair[0],old);
+                s.update("INSERT OR REPLACE INTO family_pending VALUES(?,?)",f,old);
+                s.update("UPDATE family SET rep=NULL,preferred=NULL WHERE id=?",f);
+            }
+            reconcilePending();return null;
+        });
+    }
+    private void reconcilePending()throws SQLException{
+        for(int f:ids("SELECT f.id FROM family f WHERE f.ended IS NULL AND f.rep IS NULL AND NOT EXISTS(SELECT 1 FROM ai_house h WHERE h.family=f.id)")){
+            if(choices(f).isEmpty())s.update("UPDATE family SET ended=? WHERE id=?",season(),f);
+        }
     }
     List<Integer> ids(String query,Object...args)throws SQLException{
         var out=new ArrayList<Integer>();try(var q=s.sql(query,args);var r=q.executeQuery()){while(r.next())out.add(r.getInt(1));}return out;
@@ -57,11 +78,11 @@ final class FamilyRegister {
     Person person(int id)throws SQLException{
         try(var q=s.sql("SELECT * FROM kin WHERE id=?",id);var r=q.executeQuery()){
             require(r.next(),"查无此人");return new Person(id,r.getInt("family"),r.getString("name"),r.getInt("birth"),r.getString("home"),
-                r.getInt("branch"),r.getInt("parent"),r.getInt("other"),r.getInt("sibling"),r.getObject("death")==null);
+                r.getInt("branch"),r.getInt("parent"),r.getInt("other"),r.getInt("sibling"),r.getObject("death")==null,r.getString("sex"));
         }
     }
-    int addPerson(int f,String name,int birth,String home,Integer parent,Integer other,Integer sibling)throws SQLException{
-        s.update("INSERT INTO kin(family,name,birth,home,parent,other,sibling) VALUES(?,?,?,?,?,?,?)",f,label(name),birth,home,parent,other,sibling);
+    int addPerson(int f,String name,int birth,String home,Integer parent,Integer other,Integer sibling,String sex)throws SQLException{
+        s.update("INSERT INTO kin(family,name,birth,home,parent,other,sibling,sex) VALUES(?,?,?,?,?,?,?,?)",f,label(name),birth,home,parent,other,sibling,sex);
         return s.number("SELECT last_insert_rowid()");
     }
     int found(String actor,String familyName,String founder,String emblem)throws SQLException{
@@ -70,8 +91,8 @@ final class FamilyRegister {
             s.update("INSERT INTO family(account,name,emblem) VALUES(?,?,?)",actor,label(familyName),label(emblem));
             int f=s.number("SELECT last_insert_rowid()");
             String home=s.value("SELECT id FROM manor WHERE owner=? AND residents>=2 ORDER BY id LIMIT 1",actor);
-            int first=addPerson(f,founder,season-28*4,home,null,null,null);
-            addPerson(f,"阿黛尔",season-23*4,home,null,null,first);
+            int first=addPerson(f,founder,season-28*4,home,null,null,null,"男");
+            addPerson(f,"阿黛尔",season-23*4,home,null,null,first,"女");
             s.update("UPDATE family SET rep=? WHERE id=?",first,f);syncAssets(actor,first);
             return f;
         });
@@ -81,17 +102,10 @@ final class FamilyRegister {
             s.update("INSERT OR IGNORE INTO family_asset SELECT ?,id,? FROM "+pair[1]+" WHERE owner=?",pair[0],person,actor);
     }
     List<Integer> living(int f)throws SQLException{return ids("SELECT id FROM kin WHERE family=? AND death IS NULL ORDER BY birth,id",f);}
+    boolean inTransit(int person)throws SQLException{return s.number("SELECT count(*) FROM family_journey WHERE person=?",person)>0;}
     void own(int f,int id)throws SQLException{var p=person(id);require(p.family()==f && p.alive(),"须选本家在世成员");}
     List<Integer> successors(int id)throws SQLException{
-        var p=person(id);var options=living(p.family());options.remove(Integer.valueOf(id));
-        var children=ids("SELECT id FROM kin WHERE family=? AND (parent=? OR other=?) AND death IS NULL ORDER BY birth,id",p.family(),id,id);
-        if(!children.isEmpty())return children;
-        var descendants=new ArrayList<Integer>();collectDescendants(id,descendants,new HashSet<>());
-        var sameHouse=new ArrayList<Integer>();for(int child:descendants)if(person(child).family()==p.family())sameHouse.add(child);
-        if(!sameHouse.isEmpty())return sameHouse;
-        // A newly named local spouse keeps marital protection but is not a collateral blood relative.
-        for(int spouse:ids("SELECT b FROM family_match WHERE b IN (SELECT id FROM kin WHERE family=? AND parent IS NULL AND sibling IS NULL) AND a IN (SELECT id FROM kin WHERE family=?)",p.family(),p.family()))options.remove(Integer.valueOf(spouse));
-        return options;
+        return lineage.playable(id);
     }
     void mandate(int f,String title,String task,int seasons)throws SQLException{
         require(List.of("亲收税箱","交印").contains(task) && seasons>=1 && seasons<=4,"请选择亲收税箱或交印，授权一至四季");
@@ -107,7 +121,7 @@ final class FamilyRegister {
             AND k.death IS NULL AND k.family=f.id AND t.seal=('族人·'||m.issuer) AND m.until>?""",title,task,actor,season())==1;
     }
     void prefer(int f,int pick)throws SQLException{
-        require(successors(rep(f)).contains(pick),"须先选本家在世子女，无子女方可选旁系");
+        require(successors(rep(f)).contains(pick),"须从本家男嗣、本家兄弟或合资格的外孙中依序选择");
         s.update("UPDATE family SET preferred=? WHERE id=?",pick,f);
     }
     String actorFor(int person)throws SQLException{
@@ -115,23 +129,37 @@ final class FamilyRegister {
         var p=person(person);String a=account(p.family());
         return a!=null && rep(p.family())==person?a:personal(person);
     }
-    List<Integer> heirs(int id)throws SQLException{
-        var p=person(id);String law=s.value("SELECT law FROM family WHERE id=?",p.family());
+    List<Integer> bloodHeirs(int id)throws SQLException{
         var descendants=new ArrayList<Integer>();
-        collectDescendants(id,descendants,new HashSet<>());
-        if(descendants.isEmpty())descendants.addAll(successors(id));
-        if(law.equals("年长者")){
-            descendants.clear();descendants.addAll(living(p.family()));descendants.remove(Integer.valueOf(id));
-        }
-        if(law.equals("幼嗣"))Collections.reverse(descendants);
-        if(!descendants.isEmpty() && List.of("长嗣","幼嗣","年长者").contains(law))return List.of(descendants.getFirst());
+        maleDescendants(id,descendants,new HashSet<>(),0);
+        if(descendants.isEmpty())descendants.addAll(lineage.brothers(id));
         return descendants;
     }
-    private void collectDescendants(int id,List<Integer> heirs,Set<Integer> visited)throws SQLException{
+    List<Integer> heirs(int id)throws SQLException{
+        var eligible=bloodHeirs(id);
+        if(eligible.isEmpty())eligible.addAll(lineage.grandsons(id,true));
+        String law=s.value("SELECT law FROM family WHERE id=?",person(id).family());
+        if(law.equals("年长者")){
+            var agnates=lineage.agnates(id);
+            if(!agnates.isEmpty())eligible=agnates;
+            byAge(eligible);
+        }
+        if(law.equals("幼嗣"))Collections.reverse(eligible);
+        if(!eligible.isEmpty() && List.of("长嗣","幼嗣","年长者").contains(law))return List.of(eligible.getFirst());
+        return eligible;
+    }
+    private void byAge(List<Integer> people)throws SQLException{
+        var births=new HashMap<Integer,Integer>();
+        for(int id:people)births.put(id,person(id).birth());
+        people.sort(Comparator.comparingInt(births::get));
+    }
+    void maleDescendants(int id,List<Integer> heirs,Set<Integer> visited,int family)throws SQLException{
         if(!visited.add(id))return;
-        for(int child:ids("SELECT id FROM kin WHERE parent=? OR other=? ORDER BY birth,id",id,id)){
-            if(person(child).alive()){if(!heirs.contains(child))heirs.add(child);}
-            else collectDescendants(child,heirs,visited);
+        for(int child:ids("SELECT id FROM kin WHERE sex='男' AND (parent=? OR other=?) ORDER BY birth,id",id,id)){
+            var p=person(child);
+            if(family!=0 && p.family()!=family)continue;
+            if(p.alive()){if(!heirs.contains(child))heirs.add(child);}
+            else maleDescendants(child,heirs,visited,family);
         }
     }
     long[] portions(int who,List<Integer> heirs,long value,String law)throws SQLException{
@@ -150,8 +178,8 @@ final class FamilyRegister {
         var branches=new ArrayList<Integer>();
         for(int child:ids("SELECT id FROM kin WHERE parent=? OR other=? ORDER BY birth,id",parent,parent)){
             if(heirs.contains(child))branches.add(child);
-            else if(!person(child).alive()){
-                var below=new ArrayList<Integer>();collectDescendants(child,below,new HashSet<>());
+            else if(!person(child).alive() && person(child).sex().equals("男")){
+                var below=new ArrayList<Integer>();maleDescendants(child,below,new HashSet<>(),0);
                 if(below.stream().anyMatch(heirs::contains))branches.add(child);
             }
         }
@@ -171,11 +199,11 @@ final class FamilyRegister {
             for(var entry:award.shares().entrySet())shares.add(person(entry.getKey()).name()+" "+(entry.getValue()/100.0)+"%");
             out.add(new Right(lot.kind(),lot.key(),lot.name(),personal(award.manager()),law+(shares.size()>1?" · "+String.join("，",shares):"")));
         }
-        int hereditaryIndex=0;
-        var hereditary=new ArrayList<RealmStore.Title>();
+        var partitionIndex=new HashMap<String,Integer>();
+        var partitionSize=new HashMap<String,Integer>();
         for(var t:s.titles())if(actor.equals(t.lawful()) && !t.id().equals("crown") && !t.charter().equals("流官")
             && (t.charter().equals("收益封契") || s.number("SELECT hereditary FROM office WHERE id=?",t.id())==1 || t.parent()==null))
-            hereditary.add(t);
+            partitionSize.merge(lineage.order(t.id(),id),1,Integer::sum);
         for(var t:s.titles()){
             if(!actor.equals(t.lawful()) && !actor.equals(t.seal()))continue;
             String dest=Succession.VACANT,basis="等待重新任命";
@@ -183,20 +211,25 @@ final class FamilyRegister {
             else if(!actor.equals(t.lawful())){dest=t.lawful();basis="归还法定持有人";}
             else if(t.charter().equals("流官") || (!t.charter().equals("收益封契") && (t.rank().equals("修院") || t.rank().equals("主教"))))basis="官印、公库交新任";
             else if(t.charter().equals("收益封契") || s.number("SELECT hereditary FROM office WHERE id=?",t.id())==1 || t.parent()==null){
+                String order=lineage.order(t.id(),id);
+                var eligible=lineage.titleHeirs(id,t.id());
+                var ordered=new ArrayList<>(eligible);
+                if(order.equals("幼嗣"))Collections.reverse(ordered);
+                if(order.equals("年长者"))byAge(ordered);
                 int candidate=s.number("SELECT person FROM family_nomination WHERE title=?",t.id());
                 String legacy=s.value("SELECT heir FROM office WHERE id=?",t.id());
-                if(candidate!=0 && person(candidate).alive())dest=personal(candidate);
-                else if(legacy!=null && !legacy.startsWith("族人·") && !legacy.equals(actor))dest=legacy;
-                else if(!heirs.isEmpty()){
-                    int position=hereditaryIndex;
-                    if(law.equals("优先分割") && heirs.size()>1){
-                        int primary=(hereditary.size()+1)/2;
-                        position=position<primary?0:1+(position-primary)%(heirs.size()-1);
+                if(eligible.contains(candidate))dest=personal(candidate);
+                else if(legacy!=null && !legacy.startsWith("族人·") && eligible.contains(s.number("SELECT rep FROM family WHERE account=? AND ended IS NULL",legacy)))dest=legacy;
+                else if(!ordered.isEmpty()){
+                    int position=partitionIndex.getOrDefault(order,0);
+                    if(order.equals("优先分割") && ordered.size()>1){
+                        int primary=(partitionSize.getOrDefault(order,1)+1)/2;
+                        position=position<primary?0:1+(position-primary)%(ordered.size()-1);
                     }
-                    dest=personal(heirs.get(position%heirs.size()));
+                    dest=personal(ordered.get(List.of("长嗣","幼嗣","年长者").contains(order)?0:position%ordered.size()));
                 }
-                hereditaryIndex++;
-                basis="依封契或家法继任";
+                partitionIndex.merge(order,1,Integer::sum);
+                basis=lineage.law(t.id())+" · "+order+(dest.equals(Succession.VACANT)?" · 缺合资格男嗣":" · 依封契继任");
             }
             if(basis.equals("等待重新任命") && actor.equals(t.seal()) && !heirs.isEmpty() &&
                 s.number("SELECT count(*) FROM endorsement WHERE id=?",t.id())>=2){
@@ -246,6 +279,7 @@ final class FamilyRegister {
             if(!candidates.contains(primary))primary=candidates.isEmpty()?0:candidates.getFirst();
             s.update("UPDATE kin SET death=? WHERE id=?",season(),id);
             s.update("UPDATE family SET rep=NULL,preferred=? WHERE id=?",primary==0?null:primary,f);
+            s.update("INSERT OR REPLACE INTO family_pending VALUES(?,?)",f,id);
             for(var award:awards)holdings.assign(id,award);
             for(var right:rights){
                 if(right.kind().equals("职权"))apply(right,id,actor);
@@ -260,6 +294,7 @@ final class FamilyRegister {
             if(p.home()!=null)s.update("UPDATE manor SET residents=max(0,residents-1) WHERE id=?",p.home());
             s.update("UPDATE tax_remission SET state='授权失效' WHERE state IN ('已核准','待会签') AND (issuer=? OR signer=?)",actor,actor);
             s.update("DELETE FROM pit_contract WHERE issuer=? OR operator=?",actor,actor);
+            s.update("DELETE FROM family_journey WHERE person=?",id);
             if(primary==0)s.update("UPDATE family SET ended=? WHERE id=?",season(),f);
             s.update("DELETE FROM family_famine WHERE person=?",id);
             s.update("INSERT INTO life_receipt VALUES(?,?,?)",id,season(),summary);
@@ -286,29 +321,29 @@ final class FamilyRegister {
             }
             s.update("UPDATE kin SET home=NULL WHERE id=?",who);
         }
-        for(int f:ids("SELECT id FROM family WHERE ended IS NULL AND rep IS NULL")){
-            if(choices(f).isEmpty())s.update("UPDATE family SET ended=? WHERE id=?",season,f);
-        }
+        reconcilePending();
     }
     List<Integer> choices(int f)throws SQLException{
-        int last=s.number("SELECT k.id FROM kin k JOIN life_receipt l ON l.person=k.id WHERE k.family=? ORDER BY l.rowid DESC LIMIT 1",f);
-        return successors(last);
+        int last=s.number("SELECT predecessor FROM family_pending WHERE family=?",f);
+        if(last==0)last=s.number("SELECT k.id FROM kin k JOIN life_receipt l ON l.person=k.id WHERE k.family=? ORDER BY l.season DESC,l.rowid DESC LIMIT 1",f);
+        return last==0?List.of():successors(last);
     }
     void assume(int f,int chosen)throws SQLException{
         s.atomic(()->{
             require(account(f)!=null && rep(f)==0 && choices(f).contains(chosen),"请从本次接续名单选择");
-            activate(f,chosen);return null;
+            lineage.receive(f,chosen);activate(f,chosen);reconcilePending();return null;
         });
     }
     private void activate(int f,int chosen)throws SQLException{
         String actor=account(f),token=personal(chosen);
         s.update("UPDATE family SET rep=?,preferred=NULL WHERE id=?",chosen,f);
+        s.update("DELETE FROM family_pending WHERE family=?",f);
         s.update("UPDATE title SET lawful=CASE WHEN lawful=? THEN ? ELSE lawful END,seal=CASE WHEN seal=? THEN ? ELSE seal END WHERE lawful=? OR seal=?",token,actor,token,actor,token,token);
     }
     void retire(int f,int target)throws SQLException{
         s.atomic(()->{
             int old=rep(f);var here=person(old);var there=person(target);
-            require(here.age(season())>=18 && successors(old).contains(target) && there.age(season())>=18 && here.home()!=null && here.home().equals(there.home()),"两名成年交接人须同住本庄");
+            require(there.family()==f && here.age(season())>=18 && successors(old).contains(target) && there.age(season())>=18 && here.home()!=null && here.home().equals(there.home()),"两名成年交接人须同住本庄");
             // The living former representative keeps their individual offices.
             String actor=account(f),token=personal(old);
             s.update("UPDATE title SET lawful=CASE WHEN lawful=? THEN ? ELSE lawful END,seal=CASE WHEN seal=? THEN ? ELSE seal END WHERE lawful=? OR seal=?",actor,token,actor,token,actor,actor);

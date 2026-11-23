@@ -36,8 +36,12 @@ final class FamilyPayments {
         int due=s.number("SELECT "+(dowry?"dowry":"support")+" FROM family_match WHERE id=?",match);
         require(due>0,"婚书无此款项");String key=dowry?"dowry/"+match:"support/"+match+"/"+period;
         require(s.number("SELECT count(*) FROM family_payment WHERE bill=?",key)==0,"此款已经交割");
-        require(receiver.alive() || (dowry && book.account(receiver.family())!=null),"受款家族已绝嗣，请查遗产文书");
-        return new Bill(key,payer.family(),receiver.family(),due);
+        int firstHouse=s.number("SELECT first_house FROM marriage_parties WHERE marriage=?",match);
+        int secondHouse=s.number("SELECT second_house FROM marriage_parties WHERE marriage=?",match);
+        int payHouse=payer.id()==first.id()?firstHouse:secondHouse;
+        int receiveHouse=receiver.id()==first.id()?firstHouse:secondHouse;
+        require(receiver.alive() || (dowry && book.account(receiveHouse)!=null),"受款家族已绝嗣，请查遗产文书");
+        return new Bill(key,payHouse,receiveHouse,due);
     }
     private ItemStack seal(Bill b){
         var item=new ItemStack(Material.BARREL);var meta=(BlockStateMeta)item.getItemMeta();
@@ -71,7 +75,10 @@ final class FamilyPayments {
         var s=book.s;var b=bill(match,dowry);
         require(f==b.payer() || f==b.receiver(),"须由婚书当事家族交割");
         var manor=realm.manors.register.manor(home);
-        require(manor.owner().equals(book.account(b.receiver())) && player.getLocation().distanceSquared(new Location(realm.world,manor.x()+.5,manor.y()+.5,manor.z()+.5))<=64,"须到受益家族的私庄厅仓交付");
+        boolean heldByReceiver = manor.owner().equals(book.account(b.receiver())) || s.number("""
+            SELECT count(*) FROM family_asset a JOIN kin k ON k.id=a.person WHERE a.kind='庄产' AND a.asset=?
+            AND k.family=? AND k.death IS NULL AND ('族人·'||k.id)=?""",home,b.receiver(),manor.owner())>0;
+        require(heldByReceiver && player.getLocation().distanceSquared(new Location(realm.world,manor.x()+.5,manor.y()+.5,manor.z()+.5))<=64,"须到受益家族的私庄厅仓交付");
         var bin=realm.manors.foodBarrel(manor);require(bin!=null,"未找到登记厅仓");
         var stamp=new NamespacedKey(realm.plugin,"paid/"+b.key());
         if(!bin.getPersistentDataContainer().has(stamp,PersistentDataType.BYTE)){

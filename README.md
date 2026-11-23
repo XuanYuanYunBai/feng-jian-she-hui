@@ -2,9 +2,9 @@
 
 项目名称取自马克·布洛赫（Marc Bloch）的同名著作《封建社会》（La Société féodale）。这是一个在 Minecraft 持久世界中经营家族、商行和领地的多人封建策略游戏。玩家按季调配家户与物资，与其他家族议价、订约、分担公共开支，经营结果会延续到下一季和下一代。[完整首发实施路线](docs/首发实施路线.md) · [历次计划与验收](docs/slg-design.md)
 
-当前可玩版本 **《封建社会》0.13.0** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，新玩家使用 `/realm` 打开安家手册，按指引寻地、围院，用手磨、揉面案和营火做出立庄口粮，再派庄户经营水磨。使用 `/realm atlas` 可直接打开政治图册，使用 `/realm travel` 查看脚下路况和随身货量，使用 `/realm prices` 比较各地玩家的买卖报价。
+当前可玩版本 **《封建社会》0.13.1** 使用 Paper 26.3 build 257 与 Java 25。玩家可以立庄、公议建领、经营水磨、扩张边疆，与邻国议让直辖地，以国家身份参加帝国及多边组织。管理员使用 `/realm init` 初始化署理皇廷，新玩家使用 `/realm` 打开安家手册，按指引寻地、围院，用手磨、揉面案和营火做出立庄口粮，再派庄户经营水磨。使用 `/realm atlas` 可直接打开政治图册，使用 `/realm travel` 查看脚下路况和随身货量，使用 `/realm prices` 比较各地玩家的买卖报价。
 
-输入 `/realm family` 打开家档，可题家名、查亲谱、订婚书，生前预览私产和领印的归属。生存模式身故后，选择下一位家族成员接续。婚约里的嫁资和遗属供养要从私柜取银，实物送达才算履约。[家族操作与双人实机截图](docs/paper-0.13.0-families.md)
+输入 `/realm family` 可查亲谱、订婚书、预览身后交接。玩家先从本家男性后裔接续，再找本家兄弟；两者皆无，才可迎回 AI 家族的外孙。领地各自依继承法交印。嫁资和遗属供养用实银送达。[各领继承法、途中换代和双人实测](docs/paper-0.13.1-succession.md) · [家族与实物婚书](docs/paper-0.13.0-families.md)
 
 缺粮时，地方领主可以从庄档赈单选择「按本赈单拟减征」，指定本领一座税仓和下一税期的减征比例。若税收收益已授予他人，还需税权持印人会签。减下的小麦留在产地，领主可安排磨粉、烘焙或转运。[减征操作与双人实测](docs/paper-0.12.2-remission.md)
 
@@ -14,7 +14,7 @@
 
 一张合格民房的床提供 100 个住位。庄主在厅堂打开庄档复验住房，使用水磨田务登记木案、营火并常设口粮工班。持印人可从纹章院进入「各国人口簿」查看辖内聚落。庄主可开放余房，接纳沿直接陆路逃荒的居民。[0.11.0 操作、实测与截图](docs/paper-0.11.0-residents.md)
 
-[下载插件](examples/imperial-atlas/feudal-survey-0.13.0.jar) · [手磨、揉面、烤制与作业动画](docs/paper-0.10.1-baking.md) · [一户立庄与首批产出实测](docs/paper-0.10.0-first-holding.md) · [玩家定价、水陆联运与分封验收](docs/paper-0.9.0-river-fair.md) · [商站行情、金银交割与实测](docs/paper-0.8.0-markets.md) · [玩家货运、桥梁与渡口实测](docs/paper-0.7.0-player-travel.md) · [异高道路、港口与金银路费](docs/paper-0.6.0-network.md) · [桥亭特许、BlueMap 安装与实机截图](docs/paper-0.5.2-bluemap.md) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
+[下载插件](examples/imperial-atlas/feudal-survey-0.13.1.jar) · [手磨、揉面、烤制与作业动画](docs/paper-0.10.1-baking.md) · [一户立庄与首批产出实测](docs/paper-0.10.0-first-holding.md) · [玩家定价、水陆联运与分封验收](docs/paper-0.9.0-river-fair.md) · [商站行情、金银交割与实测](docs/paper-0.8.0-markets.md) · [玩家货运、桥梁与渡口实测](docs/paper-0.7.0-player-travel.md) · [异高道路、港口与金银路费](docs/paper-0.6.0-network.md) · [桥亭特许、BlueMap 安装与实机截图](docs/paper-0.5.2-bluemap.md) · [两国议让土地与实机截图](docs/paper-0.5.1-cession.md) · [建国、磨坊与外交操作及实机截图](docs/paper-0.5.0-slg.md) · [人形 NPC 与运粮](docs/paper-0.4.1-people.md)
 
 项目人物使用 Minecraft 原版人形实体 `Mannequin`。首次加入服务器时，接受“封建社会”的资源包即可看到四套原创像素皮肤。税仓、公共货线及封臣驻地各有对应的衣着。右键驻地执事或教士可查当地领地与税权。[人物皮肤源图](assets/npc) · [资源包](examples/imperial-atlas/feudal-people-v1.zip)
 
@@ -57,7 +57,7 @@
 
 ## 构建与安装
 
-使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.13.0.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
+使用 JDK 25 与 Maven 3.9，在项目根目录运行 `mvn clean verify`。将生成的 `target/feudal-survey-0.13.1.jar` 放入 Paper 26.3 build 257 的 `plugins/`，重启服务器。数据库驱动使用该构建自带的 SQLite JDBC。首次启动会生成 `plugins/FeudalSurvey/config.yml`。
 
 小规模复验可以在全新测试存档首次执行命令前，把初始半径和步长设为 1，最大半径设为 2，并重启服务器。将一项门槛设为 1000000000，可观察首轮四个区块、次轮十二个区块与预算停机。中途暂停并重启，检查状态及坐标保留。默认配置适用于较大规模的预生成实验。
 

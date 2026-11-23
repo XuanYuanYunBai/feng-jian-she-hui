@@ -5,6 +5,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.logging.Level;
 import static social.feudal.realm.RealmStore.require;
 
@@ -14,7 +15,6 @@ final class FamilyJourney implements Listener {
     private final RealmStore s;
     FamilyJourney(FamilyOffice office)throws SQLException{
         this.office=office;s=office.book.s;
-        s.update("CREATE TABLE IF NOT EXISTS family_journey(person INTEGER PRIMARY KEY REFERENCES kin(id),family INTEGER UNIQUE REFERENCES family(id),source TEXT,dest TEXT,escort INTEGER REFERENCES kin(id),x INTEGER,y INTEGER,z INTEGER)");
         Bukkit.getPluginManager().registerEvents(this,office.realm.plugin);
         Bukkit.getScheduler().runTaskTimer(office.realm.plugin,this::positions,20,20);
     }
@@ -28,6 +28,19 @@ final class FamilyJourney implements Listener {
             }
         }catch(SQLException ex){office.realm.plugin.getLogger().log(Level.WARNING,"陪同亲属位置待复核",ex);}
     }
+    private void checkpoint(Player player)throws SQLException{
+        if(player.getWorld()!=office.realm.world)return;
+        var l=player.getLocation();
+        s.update("""
+            UPDATE family_journey SET x=?,y=?,z=? WHERE family IN
+            (SELECT id FROM family WHERE account=? AND rep=family_journey.escort)""",
+            l.getBlockX(),l.getBlockY(),l.getBlockZ(),player.getUniqueId().toString());
+    }
+    @EventHandler(priority=EventPriority.MONITOR) public void leave(org.bukkit.event.player.PlayerQuitEvent event)throws SQLException{
+        checkpoint(event.getPlayer());
+    }
+    @EventHandler(priority=EventPriority.LOWEST,ignoreCancelled=true)
+    public void death(org.bukkit.event.entity.PlayerDeathEvent event)throws SQLException{checkpoint(event.getEntity());}
     @EventHandler(ignoreCancelled=true) public void teleport(PlayerTeleportEvent e)throws SQLException{
         if(e.getFrom().getWorld()!=office.realm.world)return;
         if(s.number("SELECT count(*) FROM family_journey j JOIN family f ON f.id=j.family AND f.rep=j.escort WHERE f.account=?",e.getPlayer().getUniqueId().toString())>0){
@@ -58,9 +71,25 @@ final class FamilyJourney implements Listener {
         }
         s.update("UPDATE family_journey SET escort=? WHERE family=?",office.book.rep(f),f);
     }
+    List<Integer> stranded(Player player)throws SQLException{
+        var l=player.getLocation();
+        return office.book.ids("""
+            SELECT j.person FROM family_journey j JOIN family f ON f.id=j.family WHERE f.ended IS NOT NULL
+            AND (j.x+0.5-?)*(j.x+0.5-?)+(j.y+0.5-?)*(j.y+0.5-?)+(j.z+0.5-?)*(j.z+0.5-?)<=36
+            ORDER BY j.person""",l.getX(),l.getX(),l.getY(),l.getY(),l.getZ(),l.getZ());
+    }
+    void assist(Player p,int f,int person)throws SQLException{
+        require(stranded(p).contains(person),"须在失去陪同家族的旅人六格内");
+        require(s.number("SELECT count(*) FROM family_journey WHERE family=?",f)==0,"请先办结本家正在陪同的行程");
+        s.update("UPDATE family_journey SET family=?,escort=? WHERE person=?",f,office.book.rep(f),person);
+    }
     void arrive(Player p,int f,boolean back)throws SQLException{
         int escort=office.book.rep(f);String home=s.value("SELECT "+(back?"source":"dest")+" FROM family_journey WHERE family=? AND escort=?",f,escort);
         require(home!=null,"须先在等候处接回在途成员");hall(p,home);
+        if(!back){
+            int id=s.number("SELECT person FROM family_journey WHERE family=?",f);
+            require(office.livelihood.canStay(office.book.person(id).family(),home) || s.number("SELECT count(*) FROM family_match WHERE (a=? OR b=?) AND home=? AND state='已婚'",id,id,home)>0,"寄居文书已失效，可续约或护送返乡");
+        }
         s.atomic(()->{
             require(s.update("UPDATE manor SET residents=residents+1 WHERE id=? AND (housing>residents OR ?=1)",home,back?1:0)==1,"目的庄已满，可护送返乡");
             s.update("UPDATE kin SET home=? WHERE id=(SELECT person FROM family_journey WHERE family=?)",home,f);

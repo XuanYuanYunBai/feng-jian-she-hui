@@ -69,7 +69,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         Bukkit.getPluginManager().registerEvents(new ProductionTools(),plugin);
         firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
-        families=new FamilyOffice(this);
+        families=new FamilyOffice(this);council.succession.families=families.book;
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
             Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);

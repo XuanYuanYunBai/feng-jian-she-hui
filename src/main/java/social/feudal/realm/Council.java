@@ -29,7 +29,7 @@ final class Council {
                 int family=realm.families.book.family(actor);
                 if(a[0].equals("heir") && family!=0){
                     requireKinNumber(a[2]);int person=Integer.parseInt(a[2]);
-                    realm.families.book.own(family,person);RealmStore.require(person!=realm.families.book.rep(family),"请提名另一名本家成员");next=FamilyRegister.personal(person);
+                    RealmStore.require(realm.families.book.lineage.titleHeirs(realm.families.book.rep(family),id).contains(person),"此人不在本领法定男性继承顺位内");next=FamilyRegister.personal(person);
                     realm.store.atomic(()->{succession.nominate(id,actor,next);realm.store.update("INSERT OR REPLACE INTO family_nomination VALUES(?,?)",id,person);return null;});
                     break;
                 }
