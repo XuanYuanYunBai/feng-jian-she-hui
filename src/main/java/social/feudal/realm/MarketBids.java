@@ -20,6 +20,11 @@ final class MarketBids {
                     (samples==0?" · 暂无成交，采用业主起价":" · 参考 "+samples+" 对交易者");
         }
     }
+    void withdraw(int id,String owner)throws SQLException{
+        RealmStore.require(s.update("""
+            UPDATE bid SET remaining=0 WHERE id=? AND remaining>0
+            AND stall IN (SELECT id FROM stall WHERE owner=? AND x IS NOT NULL)""",id,owner)==1,"只有现任业主能撤下尚有余批的订单");
+    }
     record Page(List<Offer> offers,boolean more){}
     private final RealmStore s;
 

@@ -99,12 +99,15 @@ final class Charters {
             return governor.name()+" · 追加后此人合计 "+total+"/"+GOVERNOR_LIMIT+" 区块";
         });
     }
+    void checkEstate(String actor,String parent,String kind,String id,RealmStore.Depot d)throws SQLException{
+        var from=acts(parent,actor);newId(id);
+        require(!from.charter().equals("流官") && Set.of("伯爵","公爵","国王","皇帝").contains(from.rank()),"此官职没有收益转授权");
+        require(ESTATES.contains(kind),"可授庄园、修院、磨坊或地租");
+        require(parent.equals(s.owner(d.x(),d.z())) && s.value("SELECT title FROM tax_right WHERE depot=?",d.id())==null,"该税源不在可处分的直辖收入中");
+    }
     void estate(String actor,String parent,String kind,String id,String name,String grantee,RealmStore.Depot d)throws SQLException{
         s.atomic(()->{
-            var from=acts(parent,actor);newId(id);
-            require(!from.charter().equals("流官") && Set.of("伯爵","公爵","国王","皇帝").contains(from.rank()),"此官职没有收益转授权");
-            require(ESTATES.contains(kind),"可授庄园、修院、磨坊或地租");
-            require(parent.equals(s.owner(d.x(),d.z())) && s.value("SELECT title FROM tax_right WHERE depot=?",d.id())==null,"该税源不在可处分的直辖收入中");
+            checkEstate(actor,parent,kind,id,d);
             s.titleRow(id,name,kind,parent,"收益封契",grantee,d.x(),d.z());
             s.politics.attach(s.title(id));
             s.update("INSERT INTO tax_right VALUES(?,?)",d.id(),id);return null;

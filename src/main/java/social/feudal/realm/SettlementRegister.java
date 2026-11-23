@@ -29,6 +29,7 @@ final class SettlementRegister {
                 return null;
             });
         }
+        s.update("CREATE TABLE IF NOT EXISTS population_turnover(manor TEXT REFERENCES manor(id),season INTEGER,people INTEGER NOT NULL,PRIMARY KEY(manor,season))");
         s.update("CREATE TABLE IF NOT EXISTS pantry_snapshot(manor TEXT REFERENCES manor(id),season INTEGER,stock INTEGER,PRIMARY KEY(manor,season))");
         s.update("""
             CREATE TABLE IF NOT EXISTS population_season(manor TEXT REFERENCES manor(id),season INTEGER,
@@ -103,7 +104,8 @@ final class SettlementRegister {
             require(s.value("SELECT id FROM manor WHERE id=? UNION SELECT id FROM title WHERE id=?",id,id)==null,"庄园代号已用");
             available(actor,b);
             int residents=100;
-            if(s.number("SELECT count(*) FROM manor WHERE owner=?",actor)>0){
+            boolean first=s.number("SELECT count(*) FROM manor WHERE owner=?",actor)==0;
+            if(!first){
                 require(!m.cottage(),"安家只适用于首庄");
                 String source=s.value("SELECT id FROM manor WHERE owner=? AND residents>=400 AND last_season=? ORDER BY residents DESC,id LIMIT 1",actor,season());
                 if(source!=null && s.value("SELECT name FROM sqlite_schema WHERE name='kin'")!=null)
@@ -124,7 +126,16 @@ final class SettlementRegister {
                 s.update("UPDATE family_guest SET settlers=0 WHERE manor=? AND guest=(SELECT id FROM family WHERE account=? AND ended IS NULL)",source,actor);
             }
             s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,residents,cottage,last_season,housing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),residents,m.cottage()?1:0,season(),capacity);return null;
+                    id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),residents,m.cottage()?1:0,season(),capacity);
+            if(first && s.value("SELECT name FROM sqlite_schema WHERE name='family_journey'")!=null){
+                s.update("""
+                    UPDATE kin SET home=? WHERE family=(SELECT id FROM family WHERE account=? AND ended IS NULL)
+                    AND home IS NULL AND death IS NULL AND parent IS NULL AND other IS NULL
+                    AND (id=(SELECT rep FROM family WHERE account=? AND ended IS NULL) OR sibling=(SELECT rep FROM family WHERE account=? AND ended IS NULL))
+                    AND NOT EXISTS(SELECT 1 FROM family_journey j WHERE j.person=kin.id)""",id,actor,actor,actor);
+                s.update("INSERT INTO family_asset(kind,asset,person) SELECT '庄产',?,rep FROM family WHERE account=? AND ended IS NULL AND rep IS NOT NULL",id,actor);
+            }
+            return null;
         });
     }
     // Residence follows the hall's public jurisdiction. Revenue grants and imperial membership have no vote here.

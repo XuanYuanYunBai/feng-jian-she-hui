@@ -39,7 +39,7 @@ final class KitchenDuty {
         require(b!=null && m.estate().contains(b.getX(),b.getZ()),"请在本庄瞄准要登记的设施");
         require(kind.equals("木案")?recipes.boardReady(b):kind.equals("营火") && b.getState() instanceof Campfire,
                 "木案使用邻水木台阶且案面留空，烤炉使用营火");
-        require(approach(b)!=null,"设施旁须留两格高的平地供工人站立");
+        require(!approaches(b).isEmpty(),"设施旁须留两格高的平地供工人站立");
         require(s.number("SELECT count(*) FROM farmhand WHERE mill=? AND role='口粮' AND status<>'结工'",mill.id())==0,"请在本班完工后改登记");
         String owner=s.value("SELECT mill FROM kitchen WHERE x=? AND y=? AND z=?",b.getX(),b.getY(),b.getZ());
         require(owner==null || owner.equals(mill.id()),"设施已由另一磨坊使用");
@@ -54,17 +54,20 @@ final class KitchenDuty {
             return realm.world.getBlockAt(r.getInt(1),r.getInt(2),r.getInt(3));
         }
     }
-    private Location approach(Block b){
+    private List<Location> approaches(Block b){
+        var sides=new java.util.ArrayList<Location>(4);
         for(var face:List.of(BlockFace.NORTH,BlockFace.EAST,BlockFace.SOUTH,BlockFace.WEST)){
             var side=b.getRelative(face);
             if(side.isPassable() && !side.isLiquid() && side.getRelative(BlockFace.UP).isPassable()
-                    && side.getRelative(BlockFace.DOWN).getType().isSolid())return side.getLocation().add(.5,0,.5);
+                    && side.getRelative(BlockFace.DOWN).getType().isSolid())sides.add(side.getLocation().add(.5,0,.5));
         }
-        return null;
+        return sides;
     }
     private boolean at(Mannequin npc,Block b){
-        var target=approach(b);if(target==null)return false;
-        if(npc.getLocation().distanceSquared(target)>.9){navigation.toward(npc,target,1);return false;}
+        var sides=approaches(b);var here=npc.getLocation();
+        if(sides.stream().noneMatch(side->here.distanceSquared(side)<=.9)){
+            navigation.towardAny(npc,sides,1);return false;
+        }
         var direction=b.getLocation().add(.5,.6,.5).subtract(npc.getEyeLocation()).toVector();
         var faced=npc.getLocation().setDirection(direction);npc.setRotation(faced.getYaw(),faced.getPitch());
         return true;

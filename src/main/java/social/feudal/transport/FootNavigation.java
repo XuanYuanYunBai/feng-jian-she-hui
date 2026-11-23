@@ -16,6 +16,7 @@ public final class FootNavigation {
     private static final int[][] DIRECTIONS={{1,0},{-1,0},{0,1},{0,-1}};
     private static final class Walk {
         Location goal;
+        List<Cell> alternatives=List.of();
         double speed;
         int expires,refresh;
         boolean road;
@@ -26,10 +27,20 @@ public final class FootNavigation {
     public void toward(LivingEntity body,Location goal,double speed){
         target(body,goal,speed,false);
     }
+    public void towardAny(LivingEntity body,List<Location> sides,double speed){
+        if(sides.isEmpty())return;
+        var cells=sides.stream().map(Cell::at).toList();
+        var walk=walks.computeIfAbsent(body,k->new Walk());
+        if(!cells.equals(walk.alternatives)){
+            walk.refresh=0;walk.goal=sides.getFirst().clone();walk.alternatives=cells;
+        }
+        walk.speed=speed;walk.road=false;walk.expires=30;
+    }
     void onRoad(LivingEntity body,Location goal,double speed){target(body,goal,speed,true);}
     private void target(LivingEntity body,Location goal,double speed,boolean road){
         var walk=walks.computeIfAbsent(body,k->new Walk());
-        if(walk.goal==null || !Cell.at(goal).equals(Cell.at(walk.goal)))walk.refresh=0;
+        if(!walk.alternatives.isEmpty() || walk.goal==null || !Cell.at(goal).equals(Cell.at(walk.goal)))walk.refresh=0;
+        walk.alternatives=List.of();
         walk.goal=goal.clone();walk.speed=speed;walk.road=road;walk.expires=road?7:30;
     }
     void stop(LivingEntity body){
@@ -65,27 +76,34 @@ public final class FootNavigation {
         }
         return result;
     }
-    private static void route(World world,Cell start,Cell goal,Deque<Cell> path){
+    private static int distance(Cell cell,List<Cell> goals){
+        int nearest=Integer.MAX_VALUE;
+        for(var goal:goals)nearest=Math.min(nearest,cell.distance(goal));
+        return nearest;
+    }
+    private static Cell route(World world,Cell start,List<Cell> goals,Deque<Cell> path){
         path.clear();var queue=new PriorityQueue<Node>(Comparator.comparingInt(Node::cost).thenComparingInt(n->-n.spent()));
         Map<Cell,Integer> costs=new HashMap<>();Map<Cell,Cell> parents=new HashMap<>();
-        queue.add(new Node(start,0,start.distance(goal)));costs.put(start,0);Cell best=start;
+        queue.add(new Node(start,0,distance(start,goals)));costs.put(start,0);Cell best=start;
         for(int left=512;left>0 && !queue.isEmpty();left--){
             Node node=queue.remove();Cell current=node.cell;
             if(node.spent!=costs.get(current))continue;
-            if(current.distance(goal)<best.distance(goal))best=current;
-            if(current.equals(goal) || node.spent>=32 && !best.equals(start))break;
+            if(distance(current,goals)<distance(best,goals))best=current;
+            if(goals.contains(current)) {best=current;break;}
+            if(node.spent>=32 && !best.equals(start))break;
             for(int[] dir:DIRECTIONS)for(int height:new int[]{0,1,-1}){
                 var next=new Cell(current.x+dir[0],current.y+height,current.z+dir[1]);
                 if(!floor(world,next))continue;
                 if(height>0 && !world.getBlockAt(current.x,current.y+2,current.z).isPassable())continue;
                 int spent=node.spent+1+Math.abs(height);
                 if(spent<costs.getOrDefault(next,Integer.MAX_VALUE)){
-                    costs.put(next,spent);parents.put(next,current);queue.add(new Node(next,spent,spent+next.distance(goal)));
+                    costs.put(next,spent);parents.put(next,current);queue.add(new Node(next,spent,spent+distance(next,goals)));
                 }
                 break;
             }
         }
         for(Cell c=best;!c.equals(start);c=parents.get(c))path.addFirst(c);
+        return best;
     }
     private void tick(){
         var it=walks.entrySet().iterator();
@@ -96,7 +114,11 @@ public final class FootNavigation {
             }
             Location here=body.getLocation();
             if(!walk.road && --walk.refresh<=0){
-                route(here.getWorld(),Cell.at(here),Cell.at(walk.goal),walk.path);walk.refresh=20;
+                var goals=walk.alternatives.isEmpty()?List.of(Cell.at(walk.goal)):walk.alternatives;
+                var end=route(here.getWorld(),Cell.at(here),goals,walk.path);
+                if(!walk.alternatives.isEmpty() && goals.contains(end))
+                    walk.goal=new Location(here.getWorld(),end.x+.5,end.y,end.z+.5);
+                walk.refresh=20;
             }
             Cell next=walk.road?null:walk.path.peekFirst();
             if(next!=null && Math.hypot(next.x+.5-here.getX(),next.z+.5-here.getZ())<.22 && Math.abs(next.y-here.getY())<.65){

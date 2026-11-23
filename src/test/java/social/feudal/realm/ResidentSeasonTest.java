@@ -22,6 +22,14 @@ class ResidentSeasonTest {
         assertEquals(98,partial.credit());
         assertEquals(1,ResidentSeason.close(104,200,1,partial.credit(),partial.growthRemainder(),0).bread());
     }
+    @Test void annualTurnoverUsesOnlyUnnamedResidentsAndRealCapacity(){
+        assertEquals(2,ResidentSeason.annualReplacements(8,200,195,200,0));
+        assertEquals(1,ResidentSeason.annualReplacements(8,200,1,200,0));
+        assertEquals(0,ResidentSeason.annualReplacements(8,200,0,200,0));
+        assertEquals(0,ResidentSeason.annualReplacements(7,200,195,200,0));
+        assertEquals(0,ResidentSeason.annualReplacements(8,200,195,199,0));
+        assertEquals(0,ResidentSeason.annualReplacements(8,200,195,200,1));
+    }
     @Test void migrationAndCensusFollowResidence()throws Exception{
         var path=dir.resolve("realm.sqlite");
         try(var s=new RealmStore(path)){

@@ -34,18 +34,8 @@ final class FirstHolding implements Listener {
     @EventHandler public void join(PlayerJoinEvent event) {
         var p=event.getPlayer();
         if(!p.hasPlayedBefore() || site(p)!=null)
-            p.sendMessage(Component.text("《封建社会》从百人聚落开始　[打开安家手册 /realm start]",NamedTextColor.GOLD)
-                    .clickEvent(ClickEvent.runCommand("/realm start")));
-    }
-
-    boolean newcomer(Player p)throws SQLException {
-        String actor=p.getUniqueId().toString();
-        if(store.value("SELECT id FROM title WHERE seal=? OR lawful=? LIMIT 1",actor,actor)!=null)return false;
-        String home=manor(actor);
-        if(home==null)return true;
-        return realm.manors.register.manor(home).cottage() && store.number("""
-                SELECT count(*) FROM farmhand f JOIN mill w ON w.id=f.mill
-                WHERE w.manor=? AND f.delivered_flour=1""",home)==0;
+            p.sendMessage(Component.text("《封建社会》从百人聚落开始　[打开经营簿 /realm]",NamedTextColor.GOLD)
+                    .clickEvent(ClickEvent.runCommand("/realm")));
     }
 
     private String manor(String actor)throws SQLException {
@@ -103,10 +93,15 @@ final class FirstHolding implements Listener {
                 require(point!=null,"附近十六个区块内未找到合适的地籍空位，请沿边界移动后再查");
                 p.getPersistentDataContainer().set(siteKey,PersistentDataType.INTEGER_ARRAY,point);
             }
-            case "stakehome" -> {
-                var l=p.getLocation();int x=l.getBlockX(),z=l.getBlockZ(),y=l.getBlockY();
-                require(l.getBlock().isPassable() && l.getBlock().getRelative(0,-1,0).getType().isSolid()
-                        && !l.getBlock().isLiquid(),"请站在院内干燥、坚实的地面定厅位");
+            case "stakehome","stakebench" -> {
+                var block=p.getLocation().getBlock();
+                if(action.equals("stakebench")){
+                    block=p.getTargetBlockExact(5);
+                    require(block!=null && (block.getType()==org.bukkit.Material.CRAFTING_TABLE || block.getType()==org.bukkit.Material.LECTERN),
+                            "请在五格内瞄准庄厅的工作台或讲台");
+                }else require(block.isPassable() && !block.isLiquid(),"请站在院内干燥的地面定厅位");
+                require(block.getRelative(0,-1,0).getType().isSolid(),"厅位下方须有坚实地面");
+                int x=block.getX(),z=block.getZ(),y=block.getY();
                 var bounds=yard(x,z);border(bounds);realm.manors.register.available(actor,bounds);
                 p.getPersistentDataContainer().set(siteKey,PersistentDataType.INTEGER_ARRAY,new int[]{x,y,z});
             }
@@ -156,8 +151,9 @@ final class FirstHolding implements Listener {
             }else body.add(text("回厅位八格内可以现场查验。"));
             buttons.add(command("重新查验","realm start"));buttons.add(command("改在脚下定址","realm stakehome"));
         }
+        buttons.add(command("用眼前已有庄厅定址","realm stakebench"));
         if(pos!=null)buttons.add(command("清除选址","realm clearhome"));
-        buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("我的经营簿","realm journal"));buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 
@@ -183,7 +179,7 @@ final class FirstHolding implements Listener {
             }
             buttons.add(command("水磨田务","realm mill "+mill));
         }
-        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("我的经营簿","realm journal"));buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 }

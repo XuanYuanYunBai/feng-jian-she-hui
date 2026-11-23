@@ -1,6 +1,9 @@
 package social.feudal.realm;
 
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.List;
+import static social.feudal.ui.Menus.*;
 import org.bukkit.command.CommandSender;
 import static social.feudal.realm.RealmService.*;
 
@@ -26,7 +29,7 @@ final class CharterOffice {
             case "patent" -> {
                 usage(a.length>=11,"patent 帝国ID 伯爵|城市|修院 新ID 名称 人名 西 北 东 南 特许条件");
                 law.patent(actor,a[1],a[2],a[3],a[4],grantee(a[5]),bounds(a,6),
-                        String.join(" ",java.util.Arrays.copyOfRange(a,10,a.length)));
+                        String.join(" ",Arrays.copyOfRange(a,10,a.length)));
                 s.sendMessage("帝国直属特许已签发 · "+a[4]);
             }
             case "register" -> {
@@ -42,6 +45,11 @@ final class CharterOffice {
                 var b=bounds(a,6);String person=grantee(a[5]);
                 s.sendMessage((preview?"预览 · ":"授封完成 · ")+law.grant(actor,a[1],a[2],a[3],a[4],person,b,preview));
                 if(preview)realm.preview(p,b,a[2].equals("流官")?"合计 "+(law.areaHeld(person)+b.area())+"/256":"授予 "+b.area());
+                if(preview){
+                    String sign="realm grant "+String.join(" ",Arrays.copyOfRange(a,1,a.length));
+                    show(p,"核对授封",List.of(text(a[4]+" · "+a[2]+"　"+b.area()+" 区块　受领 "+realm.display(person)+"\n西北 "+b.west()+"，"+b.north()+"　东南 "+b.east()+"，"+b.south())),List.of(),
+                        List.of(command("签发封契",sign),command("返回","realm stewardship "+a[1])),1);
+                }
             }
             case "extend","estimate" -> {
                 usage(a.length==6,a[0]+" 流官领ID 西 北 东 南");
@@ -49,6 +57,15 @@ final class CharterOffice {
                 var b=bounds(a,2);
                 s.sendMessage((preview?"预览 · ":"追加完成 · ")+law.add(actor,a[1],b,preview));
                 if(preview)realm.preview(p,b,"合计 "+(law.areaHeld(realm.store.title(a[1]).seal())+b.area())+"/256");
+            }
+            case "incomepreview" -> {
+                usage(a.length==7,"incomepreview 上级 税仓 种类 代号 名称 人名");
+                var d=realm.taxes.ledger.depot(a[2]);var t=law.acts(a[1],actor);
+                law.checkEstate(actor,a[1],a[3],a[4],d);
+                String person=grantee(a[6]);
+                show(p,"核对收益封契",List.of(text(t.name()+" 将 "+d.name()+" 的"+a[3]+"收益授予 "+realm.display(person)+"。辖地与居民仍留本领。")),List.of(),
+                    List.of(command("签发收益封契","realm estate "+a[1]+" "+a[3]+" "+a[4]+" "+a[5]+" "+a[6]+" "+a[2]),command("返回","realm stewardship "+a[1])),1);
+                return;
             }
             case "estate" -> {
                 usage(a.length==7,"estate 上级 庄园|修院|磨坊|地租 新ID 名称 人名 税仓ID");

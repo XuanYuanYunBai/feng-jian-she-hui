@@ -129,7 +129,11 @@ final class MarketOffice implements Listener {
                 usage(a.length==2,"quote 收购单号");int id=Integer.parseInt(a[1]);
                 var offer=bids.offer(id);
                 var buttons=new ArrayList<ActionButton>();
-                if(offer.remaining()>0)buttons.add(command(offer.ask()?"在柜台买一批":"在柜台卖一批",offer.deal()));
+                if(offer.remaining()>0){
+                    if(actor.equals(s.value("SELECT owner FROM stall WHERE id=?",offer.stall())))
+                        buttons.add(command("到柜撤下未成交批次","realm unlist "+id));
+                    else buttons.add(command(offer.ask()?"在柜台买一批":"在柜台卖一批",offer.deal()));
+                }
                 buttons.add(command("商站其他报价","realm market "+offer.stall()));
                 buttons.add(command("比较同种货物","realm prices "+offer.goods()));
                 show(p,offer.kind()+"单 #"+id,List.of(text(offer.name()+"　("+offer.x()+", "+offer.y()+", "+offer.z()+")"),
@@ -168,6 +172,11 @@ final class MarketOffice implements Listener {
                 });
                 realm.changed();page(p,a[1],1);
             }
+            case "unlist" -> {
+                usage(a.length==2,"unlist 订单号");int id=Integer.parseInt(a[1]);
+                String site=bids.offer(id).stall();at(p,site);bids.withdraw(id,actor);
+                p.sendMessage("未成交批次已撤，现款、存货和他人的待领交割物仍在原柜。");realm.changed();page(p,site,1);
+            }
             case "sell","buy" -> settle(p,a);
         }
     }
@@ -190,6 +199,7 @@ final class MarketOffice implements Listener {
             buttons.add(command("查看 #"+offer.id()+" · "+offer.name(),"realm quote "+offer.id()));
         }
         if(listed.offers().isEmpty())body.add(text("当前没有此类订单。"));
+        buttons.add(command("商站与交易","realm commerce"));
         navigation(buttons,"realm prices "+goods,page,listed.more());
         buttons.add(command("选择货种","realm pricefilter"));
         show(p,"各地行情 · "+goods+" · 第"+page+"页",body,List.of(),buttons,2);
@@ -206,7 +216,7 @@ final class MarketOffice implements Listener {
             var listed=bids.listed(site,null,page);
             for(var offer:listed.offers()){
                 body.add(text("#"+offer.id()+"　"+offer.quote()));
-                buttons.add(command((offer.ask()?"买入 #":"卖给 #")+offer.id(),offer.deal()));
+                buttons.add(command("核对订单 #"+offer.id(),"realm quote "+offer.id()));
             }
             if(listed.offers().isEmpty())body.add(text("目前没有待交割的订单。"));
             if(p.getUniqueId().toString().equals(r.getString(5))){
@@ -227,14 +237,18 @@ final class MarketOffice implements Listener {
         if(inventory.getHolder(false) instanceof Barrel b && b.getPersistentDataContainer().has(market))return b;
         return null;
     }
-    @EventHandler(ignoreCancelled=true)public void click(InventoryClickEvent e){
+    private String owner(Barrel bin)throws SQLException{
+        return s.value("SELECT owner FROM stall WHERE id=? AND x=? AND y=? AND z=?",bin.getPersistentDataContainer().get(market,PersistentDataType.STRING),bin.getX(),bin.getY(),bin.getZ());
+    }
+    @EventHandler(ignoreCancelled=true)public void click(InventoryClickEvent e)throws SQLException{
         var bin=till(e.getView().getTopInventory());if(bin==null)return;
         String actor=e.getWhoClicked().getUniqueId().toString();
         // Only single-slot operations can move goods across the three custody compartments.
         if(e.isShiftClick() || e.getClick()!=ClickType.LEFT && e.getClick()!=ClickType.RIGHT){e.setCancelled(true);return;}
         int slot=e.getRawSlot();if(slot<0 || slot>=bin.getInventory().getSize())return;
         if(slot>=1 && slot!=2){
-            if(!actor.equals(bin.getPersistentDataContainer().get(buyer,PersistentDataType.STRING)))e.setCancelled(true);
+            e.setCancelled(true);
+            if(actor.equals(owner(bin)))e.setCancelled(false);
             return;
         }
         if(slot==2){
@@ -254,7 +268,7 @@ final class MarketOffice implements Listener {
     }
     @EventHandler(ignoreCancelled=true)public void dismantle(BlockBreakEvent e)throws SQLException{
         if(!(e.getBlock().getState() instanceof Barrel b) || !b.getPersistentDataContainer().has(market))return;
-        if(!b.getInventory().isEmpty() || !e.getPlayer().getUniqueId().toString().equals(b.getPersistentDataContainer().get(buyer,PersistentDataType.STRING))){
+        if(!b.getInventory().isEmpty() || !e.getPlayer().getUniqueId().toString().equals(owner(b))){
             e.setCancelled(true);e.getPlayer().sendMessage("商柜须由业主在清空货款后拆除");return;
         }
         recover(b);

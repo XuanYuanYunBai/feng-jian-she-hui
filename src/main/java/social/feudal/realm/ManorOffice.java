@@ -136,19 +136,23 @@ final class ManorOffice implements Listener {
             // The stock and receipt share one block entity. Persist them before advancing SQLite.
             realm.world.save(true);
         }
+        int turnover=ResidentSeason.annualReplacements(season,m.residents(),realm.families.life.freeResidents(m.id()),
+                Math.max(0,housing-reserved),meal.shortfall());
+        int births=meal.births()+turnover;
         int closing=m.residents()+meal.births()-meal.deaths();
         final int surplus=stock-meal.bread();
         s.atomic(()->{
             s.update("DELETE FROM pantry_snapshot WHERE manor=? AND season<=?",m.id(),season);
             s.update("INSERT INTO population_season VALUES(?,?,?,?,?,?,?,?,?)",m.id(),season,m.residents(),housing,
-                    meal.bread(),meal.shortfall(),meal.births(),meal.deaths(),closing);
+                    meal.bread(),meal.shortfall(),births,meal.deaths()+turnover,closing);
+            if(turnover>0)s.update("INSERT INTO population_turnover VALUES(?,?,?)",m.id(),season,turnover);
             s.update("""
                 UPDATE manor SET residents=?,housing=?,last_season=?,ration_credit=?,growth_remainder=?,shortages=?,
                 service=CASE WHEN ? AND settled>=? THEN service+1 ELSE 0 END,settled=0 WHERE id=?""",
                     closing,housing,season,meal.credit(),meal.growthRemainder(),meal.shortages(),
                     meal.shortfall()==0 && surplus>=3,seasonSeconds,m.id());
             if(meal.deaths()>0)realm.families.book.famine(m.id(),closing,season);
-            realm.families.life.yearAt(m.id(),season,meal.births());
+            realm.families.life.yearAt(m.id(),season,births);
             return null;
         });
         realm.changed();
@@ -228,7 +232,9 @@ final class ManorOffice implements Listener {
             buttons.add(command("现场复验住房","realm housing "+id));
             var report=s.value("""
                 SELECT '第 '||season||' 季　期初 '||opening||' 人，吃粮 '||bread||' 个面包，缺 '||shortfall||
-                ' 人份，出生 '||births||' 人，死亡 '||deaths||' 人。' FROM population_season
+                ' 人份，出生 '||births||' 人，死亡 '||deaths||' 人。'||coalesce(
+                (SELECT '其中自然更替 '||people||' 人。' FROM population_turnover t WHERE t.manor=p.manor AND t.season=p.season),'')
+                FROM population_season p
                 WHERE manor=? ORDER BY season DESC LIMIT 1""",id);
             var pantry=loaded(m.estate())?foodBarrel(m):null;
             if(pantry!=null){
@@ -238,7 +244,7 @@ final class ManorOffice implements Listener {
                 int reserved=s.number("SELECT coalesce(sum(people),0) FROM migration WHERE dest=? AND arrived=0",id);
                 var forecast=ResidentSeason.close(m.residents(),Math.max(0,housing-reserved),bread,credit,
                         s.number("SELECT growth_remainder FROM manor WHERE id=?",id),0);
-                body.add(text("按现有房粮预计出生 "+forecast.births()+" 人　｜　季末以可用床位和实仓验收"));
+                body.add(text("按现有房粮预计自然净增 "+forecast.births()+" 人　｜　季末以可用床位和实仓验收"));
                 int deficit=Math.max(0,m.residents()-bread*100-credit);
                 body.add(text("仓内面包 "+bread+" 个　｜　上季余下 "+credit+" 人份　｜　下季预计缺 "+deficit+" 人份"));
             }

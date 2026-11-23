@@ -95,6 +95,7 @@ final class FamilyOffice implements Listener {
     }
     void checkPublicAct(Player player,String action,String[] args)throws SQLException{
         int house=enroll(player);
+        if(action.equals("journal"))return;
         if(house==0){
             require(Set.of("help","start","atlas","here","depots","travel","prices","buildings","init").contains(action),"旧家无合资格男嗣，请在家档另立新家");return;
         }

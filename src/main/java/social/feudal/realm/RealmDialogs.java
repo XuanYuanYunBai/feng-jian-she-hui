@@ -28,6 +28,7 @@ final class RealmDialogs {
             buttons.add(command(t.name(), "realm brief " + t.id()));
         navigation(buttons, "realm atlas ", page, count);
         buttons.add(command("各国人口簿","realm census"));
+        buttons.add(command("我的经营簿","realm journal"));
         buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("安家手册","realm start"));
         buttons.add(command("各地行情","realm prices"));
         buttons.add(command("行旅与货运","realm travel"));

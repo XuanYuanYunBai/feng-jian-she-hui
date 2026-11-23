@@ -26,6 +26,7 @@ final class FoundingVillages {
     private final RealmService realm;
     private final RealmStore store;
     private final NamespacedKey stamp;
+    private boolean loadingTerrain;
 
     FoundingVillages(RealmService realm)throws SQLException{
         this.realm=realm;
@@ -60,7 +61,23 @@ final class FoundingVillages {
         store.update("UPDATE founding_village SET x=?,y=?,z=?,candidate=0 WHERE title=?",x,site.floor(),z,title);
     }
 
+    private boolean terrainReady(int cx,int cz){
+        if(realm.world.isChunkLoaded(cx,cz))return true;
+        if(!loadingTerrain){
+            loadingTerrain=true;
+            realm.world.getChunkAtAsync(cx,cz,true).whenComplete((chunk,failure)->{
+                if(!realm.plugin.isEnabled())return;
+                Bukkit.getScheduler().runTask(realm.plugin,()->{
+                    loadingTerrain=false;
+                    if(failure==null)advance();
+                    else realm.plugin.getLogger().log(Level.WARNING,"初始庄址区块加载失败，稍后复查",failure);
+                });
+            });
+        }
+        return false;
+    }
     private void advance(){
+        if(loadingTerrain)return;
         try(var q=store.sql("SELECT * FROM founding_village WHERE done=0 AND candidate<256 ORDER BY candidate,title LIMIT 1");
             var row=q.executeQuery()){
             if(!row.next())return;
@@ -78,12 +95,17 @@ final class FoundingVillages {
                         store.number("SELECT count(*) FROM depot WHERE x=? AND z=?",cx,cz)>0){
                     next(title);return;
                 }
+                if(!terrainReady(cx,cz))return;
                 site=findSite(cx,cz);
                 if(site==null){next(title);return;}
                 try{realm.manors.register.available(seat.seal(),bounds(site));}
                 catch(IllegalArgumentException ex){next(title);return;}
                 store.update("UPDATE founding_village SET x=?,y=?,z=? WHERE title=?",site.x(),site.floor(),site.z(),title);
             }
+            var siteBounds=bounds(site);
+            for(int cx=siteBounds.west()>>4;cx<=siteBounds.east()>>4;cx++)
+                for(int cz=siteBounds.north()>>4;cz<=siteBounds.south()>>4;cz++)
+                    if(!terrainReady(cx,cz))return;
             String id="village_"+title;
             var m=new SettlementRegister.Manor(id,name,"公产·"+title,site.x(),site.floor()+1,site.z()+2,bounds(site),100,0,false);
             var chunk=realm.world.getChunkAt(m.x()>>4,m.z()>>4);

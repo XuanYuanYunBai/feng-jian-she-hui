@@ -75,4 +75,17 @@ class MarketBidsTest {
             assertEquals(31,s.number("SELECT count(*) FROM market_sample"));
         }
     }
+    @Test void onlyCurrentStallOwnerCanWithdrawRemainingLots()throws Exception{
+        try(var s=new RealmStore(dir.resolve("market.sqlite"))){
+            var bids=new MarketBids(s);
+            s.update("INSERT INTO stall VALUES('quay','old','河台柜',1,2,3)");
+            s.update("INSERT INTO bid(id,stall,goods,lot,price,remaining) VALUES(1,'quay','小麦',2,1,3)");
+            s.update("INSERT INTO trade VALUES('paid',1,'客',1)");
+            s.update("UPDATE stall SET owner='new' WHERE id='quay'");
+            assertThrows(IllegalArgumentException.class,()->bids.withdraw(1,"old"));
+            bids.withdraw(1,"new");
+            assertEquals(0,bids.offer(1).remaining());assertEquals(1,s.number("SELECT count(*) FROM trade"));
+            assertThrows(IllegalArgumentException.class,()->bids.withdraw(1,"new"));
+        }
+    }
 }

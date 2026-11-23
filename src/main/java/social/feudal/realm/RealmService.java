@@ -24,6 +24,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final ManorOffice manors;
     final MillOffice mills;
     final FirstHolding firstHolding;
+    final StewardDesk steward;
     final FoundingVillages villages;
     final RefugeOffice refuge;
     final ManorRooms rooms;
@@ -67,7 +68,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         council=new Council(this);manors=new ManorOffice(this);mills=new MillOffice(this);crossings=new CrossingOffice(this);markets=new MarketOffice(this);
         labor=new WorkAllocation(store,manors.register);rooms=new ManorRooms(this);minerals=new MineralRegister(this);mines=new MineOffice(this);relief=new ReliefOffice(this);smiths=new SmithyOffice(this);
         Bukkit.getPluginManager().registerEvents(new ProductionTools(),plugin);
-        firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
+        firstHolding=new FirstHolding(this);steward=new StewardDesk(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         families=new FamilyOffice(this);council.succession.families=families.book;
         if(store.ready()) restoreMap();
@@ -117,16 +118,16 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     @Override public boolean onCommand(CommandSender s,Command command,String label,String[] a){
         try {
             String action=a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
-            if(a.length==0 && s instanceof Player p) action=!store.ready() || firstHolding.newcomer(p)?"start":"atlas";
+            if(a.length==0 && s instanceof Player p) action=store.ready()?"journal":"start";
             if(a.length>0)a[0]=action;
             if(s instanceof Player person && !action.equals("family") && store.ready())families.checkPublicAct(person,action,a);
-            if(Set.of("start","seekland","clearhome","stakehome","firstname","firstdeed","firstmill").contains(action)){
+            if(Set.of("start","seekland","clearhome","stakehome","stakebench","firstname","firstdeed","firstmill").contains(action)){
                 firstHolding.run(player(s),a);return true;
             }
             if(action.equals("buildings")){BuildingAtlas.open(this,player(s),a);return true;}
             if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
-                s.sendMessage("/realm family 家族与继承 · /realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
+                s.sendMessage("/realm 经营簿 · /realm family 家族与继承 · /realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
@@ -147,6 +148,11 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
                 case "family" -> families.run(player(s),a);
+                case "journal" -> steward.open(player(s),a);
+                case "commerce" -> steward.commerce(player(s));
+                case "localmatch","millform","stallform","depotform" -> steward.forms(player(s),a);
+                case "stewardship" -> steward.territory(player(s),a);
+                case "grantform","incomeform" -> steward.charterForm(player(s),a);
                 case "foundingvillages" -> {
                     RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要开服管理权限");
                     usage(a.length==1 || a.length==4,"foundingvillages [辖区代号 中心X 中心Z]");
@@ -199,13 +205,13 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 }
                 case "pitform" -> DiplomacyDesk.form(player(s),"设立领地矿场","在已核矿区瞄准配有支柱和工作台的坑口木桶。","realm mineopen",List.of(new DiplomacyDesk.Field("id","矿场代号","",24)));
                 case "sample","mineopen","minework","minegrant","mine" -> mines.run(player(s),a);
-                case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy" -> markets.run(player(s),a);
+                case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy","unlist" -> markets.run(player(s),a);
                 case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
-                case "millpermit","kitchen","mill","watermill","field","farmjob","millup" -> mills.run(player(s),a);
+                case "millpermit","kitchen","mill","watermill","fieldform","field","farmjob","millup" -> mills.run(player(s),a);
                 case "room","expand","expandform","asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
-                case "patent","register","preview","grant","extend","estimate","estate" -> charters.execute(s,a);
+                case "patent","register","preview","grant","extend","estimate","estate","incomepreview" -> charters.execute(s,a);
                 case "equip" -> {usage(a.length==3,"equip 税仓ID speed|pack|mule");taxes.couriers.equip(player(s),taxes.ledger.depot(a[1]),a[2]);}
                 case "crew" -> {usage(a.length==2,"crew 税仓ID");dialogs.crew(player(s),taxes.ledger.depot(a[1]));}
                 case "desk","stock","vault" -> {usage(a.length==2,action+" 登记代号");fixtures.register(player(s),action,a[1]);}

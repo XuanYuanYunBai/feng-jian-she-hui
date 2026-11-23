@@ -100,6 +100,14 @@ final class MillOffice implements Listener {
                         && wheel(m).getRelative(-2,n-1,0).getType()==Material.COMPOSTER,"扩建东侧附仓和西侧农具工位，升三级时再加一层");
                 s.update("UPDATE mill SET tier=? WHERE id=?",tier,m.id());page(p,get(m.id()));
             }
+            case "fieldform" -> {
+                usage(a.length==2,"fieldform 磨坊");var m=get(a[1]);var l=p.getLocation();
+                String corner=l.getBlockX()+" "+l.getBlockZ();
+                DiplomacyDesk.form(p,"登记磨坊托管田地","到田边填写两角的方块坐标。仅登记本庄内、磨工能步行到达的耕地。","realm field "+m.id(),
+                        List.of(new DiplomacyDesk.Field("estate","地主庄园代号",m.manor(),50),
+                                new DiplomacyDesk.Field("area","西 北 东 南",corner+" "+corner,60),
+                                new DiplomacyDesk.Field("level","耕地方块的高度",Integer.toString((l.getBlock().getType()==Material.FARMLAND?l.getBlockY():l.getBlockY()-1)),5)));
+            }
             case "field" -> {
                 usage(a.length==8,"field 磨坊 地主庄园 西 北 东 南 耕地Y");var m=get(a[1]);var estate=realm.manors.register.manor(a[2]);
                 require(realm.manors.register.manages(estate,p.getUniqueId().toString()),"须持田产办理托管");var b=new Charters.Bounds(Integer.parseInt(a[3]),Integer.parseInt(a[4]),Integer.parseInt(a[5]),Integer.parseInt(a[6]));
@@ -161,7 +169,7 @@ final class MillOffice implements Listener {
         for(var line:realm.diplomacy.column("SELECT role || ' · ' || status || '　剩余工时 ' || quota FROM farmhand WHERE mill=? AND season=? ORDER BY id",m.id(),realm.manors.register.season()))body.add(text(line));
         boolean standing=count("SELECT count(*) FROM kitchen_duty WHERE mill=?",m.id())>0;
         body.add(text("常设工班将口粮送回厅旁木桶，储足两季及三份赈粮后春播秋收。木案与营火旁须留通道。"));
-        show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("派一班收麦","realm farmjob "+m.id()+" 收麦"),command("派一班补种","realm farmjob "+m.id()+" 补种"),
+        show(p,"水磨田务 · "+m.id(),body,List.of(),List.of(command("登记托管田地","realm fieldform "+m.id()),command("派一班收麦","realm farmjob "+m.id()+" 收麦"),command("派一班补种","realm farmjob "+m.id()+" 补种"),
                 command("派磨工制粉","realm farmjob "+m.id()+" 磨粉"),command("登记眼前木案","realm kitchen "+m.id()+" 木案"),
                 command("登记眼前营火","realm kitchen "+m.id()+" 营火"),command(standing?"下季停办口粮":"常设口粮工班","realm kitchen "+m.id()+(standing?" 停办":" 常设")),command("签发领地扩建许可","realm millpermit "+m.id()),command("验收扩建","realm millup "+m.id()),command("庄园档案","realm manor "+m.manor()),command("安家手册","realm start")),2);
     }

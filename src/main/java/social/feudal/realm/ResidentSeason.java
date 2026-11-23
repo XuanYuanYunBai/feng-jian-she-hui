@@ -2,6 +2,10 @@ package social.feudal.realm;
 
 /** Ration credit is food already taken out of the barrel, in hundredths of a loaf. */
 record ResidentSeason(int bread,int credit,int shortfall,int births,int growthRemainder,int deaths,int shortages) {
+    static int annualReplacements(int season,int residents,int unnamed,int places,int shortfall){
+        if(season%4!=0 || places<residents || shortfall>0)return 0;
+        return Math.min(residents/100,Math.max(0,unnamed));
+    }
     static ResidentSeason close(int people,int places,int stock,int credit,int carry,int previousShortages){
         return close(people,places,stock,credit,carry,previousShortages,stock);
     }
