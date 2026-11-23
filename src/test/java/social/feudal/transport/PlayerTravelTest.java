@@ -15,6 +15,15 @@ class PlayerTravelTest {
         assertTrue(ROAD.speed>0 && FIELD.speed<0);
     }
 
+    @Test void shapedPavingKeepsItsMaterialLoadAndSpeed(){
+        assertEquals(RoadSurface.COBBLE,RoadSurface.of(Material.MOSSY_COBBLESTONE_STAIRS));
+        assertEquals(RoadSurface.COBBLE,RoadSurface.of(Material.COBBLESTONE_SLAB));
+        assertTrue(EARTH.accepts(64));assertFalse(EARTH.accepts(65));
+        assertTrue(GRAVEL.accepts(96));assertFalse(GRAVEL.accepts(97));
+        assertTrue(MASONRY.accepts(160));assertFalse(MASONRY.accepts(161));
+        assertTrue(RoadSurface.EARTH.crewPace()<RoadSurface.MASONRY.crewPace());
+    }
+
     @Test void deepWaterAllowsLimitedWadingAndRetreatFromAnyDistance(){
         assertTrue(PlayerTravel.canSwim(2.9,3));
         assertFalse(PlayerTravel.canSwim(3,3.01));

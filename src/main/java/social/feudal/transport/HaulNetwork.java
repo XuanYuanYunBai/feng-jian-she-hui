@@ -31,17 +31,36 @@ public final class HaulNetwork {
     }
     public Block block(Point p){return world.getBlockAt(p.x,p.y,p.z);}
     public static boolean paving(Material m){
-        return Tag.PLANKS.isTagged(m) || switch(m){
-            case DIRT_PATH,GRAVEL,COBBLESTONE,MOSSY_COBBLESTONE,STONE_BRICKS,BRICKS,SMOOTH_STONE,
-                    POLISHED_ANDESITE,DEEPSLATE_BRICKS,PACKED_MUD,MUD_BRICKS -> true;
-            default -> false;
-        };
+        return RoadSurface.of(m)!=null;
+    }
+    public Location footing(Point p){
+        var data=block(p).getBlockData();
+        double top=1;
+        if(data instanceof org.bukkit.block.data.type.Slab slab && slab.getType()==org.bukkit.block.data.type.Slab.Type.BOTTOM)top=.5;
+        else if(data instanceof org.bukkit.block.data.type.Stairs stair && stair.getHalf()==org.bukkit.block.data.Bisected.Half.BOTTOM)top=.75;
+        else if(data.getMaterial()==Material.DIRT_PATH)top=.9375;
+        return new Location(world,p.x+.5,p.y+top,p.z+.5);
+    }
+    public double pace(Point p){
+        var surface=RoadSurface.of(block(p).getType());
+        return surface==null?1:surface.crewPace();
+    }
+    private double edgeHeight(Point p,int dx,int dz){
+        double x=.5+dx*.49,z=.5+dz*.49,top=0;
+        for(var box:block(p).getCollisionShape().getBoundingBoxes())
+            if(x>=box.getMinX() && x<=box.getMaxX() && z>=box.getMinZ() && z<=box.getMaxZ())top=Math.max(top,box.getMaxY());
+        return p.y+top;
+    }
+    public boolean traversable(Point a,Point b){
+        if(a.y==b.y)return true;
+        int dx=b.x-a.x,dz=b.z-a.z;
+        return Math.abs(edgeHeight(a,dx,dz)-edgeHeight(b,-dx,-dz))<=1.065;
     }
     private boolean bareDeck(Point p){
         if(!loaded(p))return false;
         Block b=block(p);
         if(b.getType()==Material.GRAVEL && (b.getRelative(BlockFace.DOWN).getType()==Material.GRAVEL || !paving(b.getRelative(BlockFace.DOWN).getType())))return false;
-        return paving(b.getType()) && clear(b,3);
+        return paving(b.getType()) && !(b.getBlockData() instanceof org.bukkit.block.data.Waterlogged water && water.isWaterlogged()) && clear(b,3);
     }
     private static boolean clear(Block b,int height){
         for(int i=1;i<=height;i++){
@@ -144,6 +163,7 @@ public final class HaulNetwork {
                 if(cost.getOrDefault(n,Integer.MAX_VALUE)<=next || !loaded(n))continue;
                 boolean atStation=stationEnds && n.equals(end) && block(n).getType()==Material.BARREL && clear(block(n),2);
                 if(!atStation && !(sail?water(n):road(n)))continue;
+                if(!sail && !traversable(p,n))continue;
                 cost.put(n,next);prev.put(n,p);queue.add(new Node(n,next,next+Math.abs(n.x-end.x)+Math.abs(n.z-end.z)));
             }
         }

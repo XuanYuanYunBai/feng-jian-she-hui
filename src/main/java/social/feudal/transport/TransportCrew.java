@@ -47,12 +47,12 @@ public final class TransportCrew implements Listener {
             navigation.toward(porter,goal,speed);
             if(mule!=null)walkMule(packGoal);
         }
-        public void onRoad(Location goal,Location lane){
-            navigation.onRoad(porter,goal,speed);
+        public void onRoad(Location goal,Location lane,double pace){
+            navigation.onRoad(porter,goal,speed*pace);
             if(mule!=null){
                 if(!mule.hasAI())Bukkit.getMobGoals().removeAllGoals(mule);
                 mule.setAI(true);mule.setCollidable(false);mule.getPathfinder().stopPathfinding();
-                navigation.onRoad(mule,lane,speed);
+                navigation.onRoad(mule,lane,speed*pace);
             }
         }
         private void walkMule(Location goal){
@@ -109,9 +109,12 @@ public final class TransportCrew implements Listener {
             old.getInventory().clear();old.remove();home.getWorld().save(true);resident=upgraded;
         }
         if(!(resident instanceof Mannequin v))return null;
+        // Paper resets the collision flag when an entity is reloaded.
+        if(v.isCollidable())v.setCollidable(false);
         String animal=data.get(field(id,"mule"),PersistentDataType.STRING);
         Mule m=find(home.getWorld(),animal,Mule.class);
         if(animal!=null && m==null)return null;
+        if(m!=null && m.isCollidable())m.setCollidable(false);
         return new Team(v,m,m!=null?64:data.has(field(id,"pack"))?16:8,data.has(field(id,"speed"))?1.15:.72,navigation);
     }
     public void staff(Chunk home,String id,String label,Location yard){

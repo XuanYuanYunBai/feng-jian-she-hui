@@ -29,12 +29,14 @@ import static social.feudal.ui.Menus.*;
 /** Player hauling affects movement, never deletes or rewrites the cargo. */
 public final class PlayerTravel implements Listener {
     enum Ground {
-        ROAD("铺装道路",HandCargo.ROAD,.20), FIELD("野地",HandCargo.FIELD,-.20),
+        ROAD(RoadSurface.WOOD), EARTH(RoadSurface.EARTH), GRAVEL(RoadSurface.GRAVEL),
+        COBBLE(RoadSurface.COBBLE), MASONRY(RoadSurface.MASONRY), FIELD("野地",HandCargo.FIELD,-.20),
         RIVER("深水",HandCargo.FIELD,-.45), BOAT("乘船",HandCargo.ROAD,0);
         final String label;
         final int limit;
         final double speed;
         Ground(String label,int limit,double speed){this.label=label;this.limit=limit;this.speed=speed;}
+        Ground(RoadSurface surface){this(surface.label,surface.load,surface.bonus/100.0);}
         boolean accepts(long load){return load<=limit;}
     }
 
@@ -91,22 +93,28 @@ public final class PlayerTravel implements Listener {
         return false;
     }
 
-    private boolean onRoad(Location location){
-        // A dirt path sits 1/16 below the top of its block. Follow the surface during an ordinary jump.
-        int feet=(int)Math.floor(location.getY()+.08);
-        for(int d=1;d<=3;d++){
-            var p=new Point(location.getBlockX(),feet-d,location.getBlockZ());
-            if(!roads.loaded(p))return false;
-            if(roads.road(p) || pier(p))return true;
-            var block=roads.block(p);
-            if(!block.isPassable() || water(block))return false;
-        }
-        return false;
-    }
     private Ground ground(Player p,Location at){
         if(p.getVehicle() instanceof Boat)return Ground.BOAT;
         if(deep(at))return Ground.RIVER;
-        return onRoad(at)?Ground.ROAD:Ground.FIELD;
+        // Feet on a lower slab or the low tread are inside the deck's block cell.
+        int y=(int)Math.floor(at.getY()-.001);
+        for(int d=0;d<=2;d++){
+            var point=new Point(at.getBlockX(),y-d,at.getBlockZ());
+            if(!roads.loaded(point))break;
+            var block=roads.block(point);
+            if(roads.road(point)){
+                return switch(RoadSurface.of(block.getType())){
+                    case EARTH -> Ground.EARTH;
+                    case GRAVEL -> Ground.GRAVEL;
+                    case WOOD -> Ground.ROAD;
+                    case COBBLE -> Ground.COBBLE;
+                    case MASONRY -> Ground.MASONRY;
+                };
+            }
+            if(pier(point))return Ground.ROAD;
+            if(!block.isPassable() || water(block))break;
+        }
+        return Ground.FIELD;
     }
     private long load(Player p){return loads.computeIfAbsent(p.getUniqueId(),unused->HandCargo.count(p));}
     private void updateSpeed(Player p,Ground ground){
@@ -116,7 +124,7 @@ public final class PlayerTravel implements Listener {
         if(previous!=null && previous.getAmount()==ground.speed)return;
         if(previous!=null){
             attr.removeModifier(speedKey);
-            if(ground==Ground.ROAD)explain(p,"踏上铺装道路 · 步速 +20% · 运力 "+ground.limit+" 份");
+            if(ground.speed>0)explain(p,ground.label+" · 步速 +"+Math.round(ground.speed*100)+"% · 运力 "+ground.limit+" 份");
             if(ground==Ground.FIELD)explain(p,"野外步行 · 步速 −20% · 运力 "+ground.limit+" 份");
         }
         if(ground.speed!=0)attr.addTransientModifier(new AttributeModifier(speedKey,ground.speed,
@@ -264,9 +272,10 @@ public final class PlayerTravel implements Listener {
     public void report(Player p){
         var ground=ground(p,p.getLocation());long cargo=HandCargo.count(p);
         show(p,"行旅与货运",List.of(text(ground.label+"　｜　随身货物 "+cargo+" / "+ground.limit+" 份"),
-                text("铺装道路与完整栈桥　128 份，步速 +20%\n野外步行　32 份，步速 −20%"),
+                text(String.join("\n",java.util.Arrays.stream(RoadSurface.values()).map(RoadSurface::description).toList())+"\n野外步行　32 份，步速 −20%"),
+                text("按实际铺面计。台阶和楼梯沿用材料的路况；碎石须有铺装垫层。完整栈桥按木路计。脚夫按路况调速，每趟运力仍由装备决定。"),
                 text("可堆叠物品每件一份。干草块、金属块等按九份计。工具和盔甲可随身携带，收纳袋与箱中的货物照计。"),
                 text("超载可就地卸货。深水只宜靠岸涉行；远渡请走桥，或到有港仓、木栈桥和系缆桩的泊位乘船。")),
-                List.of(),List.of(command("返回纹章院","realm atlas")),1);
+                List.of(),List.of(command("登记眼前收费亭","realm bridgeform"),command("给眼前工班路费","realm purse"),command("返回经营簿","realm journal")),1);
     }
 }

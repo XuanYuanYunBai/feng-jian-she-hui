@@ -23,10 +23,10 @@ final class HandCargo {
         if(stack.hasItemMeta()){
             var meta=stack.getItemMeta();
             if(meta instanceof BundleMeta bundle){
-                if(depth>=16)return ROAD+1;
+                if(depth>=16)return Integer.MAX_VALUE;
                 for(var packed:bundle.getItems())unit+=weight(packed,depth+1);
             }else if(meta instanceof BlockStateMeta block && block.hasBlockState() && block.getBlockState() instanceof Container bin){
-                if(depth>=16)return ROAD+1;
+                if(depth>=16)return Integer.MAX_VALUE;
                 for(var packed:bin.getSnapshotInventory().getContents())unit+=weight(packed,depth+1);
             }
         }

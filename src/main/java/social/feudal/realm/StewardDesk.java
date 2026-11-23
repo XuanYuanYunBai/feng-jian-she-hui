@@ -40,7 +40,7 @@ final class StewardDesk {
         body.add(text(heirs.isEmpty()?"家档尚无可接续的男性。成年代表可在居住庄议婚，婚后由父家开启养育。":"家档可接续 "+heirs.size()+" 人　首位 "+book.person(heirs.getFirst()).name()));
         buttons.add(command("婚书与养育","realm family 婚约"));buttons.add(command("生前核对继承","realm family 继承"));
         for(String t:titles)buttons.add(command("治领 · "+s.title(t).name(),"realm stewardship "+t));
-        buttons.add(command("公共养路簿","realm works"));buttons.add(command("商站与交易","realm commerce"));buttons.add(command("家族档案","realm family"));
+        buttons.add(command("脚下路况与运力","realm travel"));buttons.add(command("公共养路簿","realm works"));buttons.add(command("商站与交易","realm commerce"));buttons.add(command("家族档案","realm family"));
         buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,"封建社会 · 经营簿",body,List.of(),buttons,2);
     }
@@ -115,6 +115,7 @@ final class StewardDesk {
                 buttons.add(command("拟授"+kind,"realm grantform "+t.id()+" "+kind));
         }
         if(grantor && List.of("伯爵","公爵","国王","皇帝").contains(t.rank()) && !t.charter().equals("收益封契")){
+            buttons.add(command("登记眼前收费亭","realm bridgeform"));
             buttons.add(command("登记脚下区块税仓","realm depotform"));
             for(var d:s.depots())if(t.id().equals(s.owner(d.x(),d.z())) && s.value("SELECT title FROM tax_right WHERE depot=?",d.id())==null)
                 buttons.add(command("拟授收益 · "+d.name(),"realm incomeform "+t.id()+" "+d.id()));

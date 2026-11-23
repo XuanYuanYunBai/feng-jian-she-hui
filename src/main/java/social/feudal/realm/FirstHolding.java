@@ -33,9 +33,17 @@ final class FirstHolding implements Listener {
 
     @EventHandler public void join(PlayerJoinEvent event) {
         var p=event.getPlayer();
-        if(!p.hasPlayedBefore() || site(p)!=null)
-            p.sendMessage(Component.text("《封建社会》从百人聚落开始　[打开经营簿 /realm]",NamedTextColor.GOLD)
+        if(p.getWorld().equals(realm.world))
+            p.sendMessage(Component.text("《封建社会》　[打开经营簿]　双手留空，潜行按交换副手键可随时查阅",NamedTextColor.GOLD)
                     .clickEvent(ClickEvent.runCommand("/realm")));
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void journal(org.bukkit.event.player.PlayerSwapHandItemsEvent event){
+        var p=event.getPlayer();
+        if(p.getWorld()!=realm.world || !p.isSneaking() || !p.getInventory().getItemInMainHand().isEmpty()
+                || !p.getInventory().getItemInOffHand().isEmpty())return;
+        event.setCancelled(true);p.performCommand("realm");
     }
 
     private String manor(String actor)throws SQLException {

@@ -195,18 +195,45 @@ final class CrossingOffice implements Listener {
         }
         show(p,"桥税争议 #"+n,body,List.of(),buttons,2);
     }
+    private void register(Player p,Block post,String id,String name,String nation,TollCoin coin,int fee)throws SQLException{
+        var gate=realm.roads.surveyGate(id,post);
+        s.atomic(()->{
+            court.bridge(p.getUniqueId().toString(),id,name,nation,post.getX(),post.getY(),post.getZ(),fee);
+            s.update("UPDATE crossing SET nx=?,nz=?,currency=? WHERE id=?",gate.nx(),gate.nz(),coin.name(),id);return null;
+        });
+        remember(gate);realm.changed();archive(p,id);
+    }
     void run(Player p,String[] a)throws SQLException{
         realm.inWorld(p);String actor=p.getUniqueId().toString();
         switch(a[0]){
             case "crossing" -> {usage(a.length==2,"crossing 桥亭");archive(p,a[1]);}
+            case "bridgeform","bridgesite" -> {
+                boolean form=a[0].equals("bridgeform");
+                usage(a.length==(form?1:7),"请从现场登记表提交");
+                Block post;
+                if(form){
+                    post=p.getTargetBlockExact(6);
+                }else{
+                    int x=Integer.parseInt(a[1]),y=Integer.parseInt(a[2]),z=Integer.parseInt(a[3]);
+                    require(p.getLocation().distanceSquared(new Location(realm.world,x+.5,y+.5,z+.5))<=49,"请回到原收费亭旁提交");
+                    post=realm.world.getBlockAt(x,y,z);
+                }
+                require(post!=null && post.getType()==Material.LECTERN,"请瞄准紧邻道路的收费讲台");
+                String title=s.owner(post.getX()>>4,post.getZ()>>4);
+                String nation=title==null?null:s.politics.nation(title);require(nation!=null,"收费亭须设在本国辖区内");
+                s.politics.represents(nation,actor);
+                String id="g_"+Integer.toString(post.getX(),36)+"_"+Integer.toString(post.getY(),36)+"_"+Integer.toString(post.getZ(),36);
+                if(form){
+                    realm.roads.surveyGate(id,post);
+                    DiplomacyDesk.form(p,"登记眼前收费亭","每次通行按柜价收费。填零开放免费通行，业主可在亭边改价。",
+                            "realm bridgesite "+post.getX()+" "+post.getY()+" "+post.getZ(),List.of(new DiplomacyDesk.Field("name","亭名","路亭",24),
+                            new DiplomacyDesk.Field("coin","金或银","金",2),new DiplomacyDesk.Field("fee","每次金额","1",2)));
+                }else register(p,post,id,a[4],nation,TollCoin.parse(a[5]),Integer.parseInt(a[6]));
+            }
             case "bridge" -> {
                 usage(a.length==5 || a.length==6,"bridge 亭号 名称 国家 [金|银] 金额");
-                var b=p.getTargetBlockExact(6);require(b!=null,"请瞄准路边讲台");
-                var g=realm.roads.surveyGate(a[1],b);var currency=a.length==6?TollCoin.parse(a[4]):TollCoin.GOLD;
-                s.atomic(()->{
-                    court.bridge(actor,a[1],a[2],a[3],b.getX(),b.getY(),b.getZ(),Integer.parseInt(a[a.length-1]));
-                    s.update("UPDATE crossing SET nx=?,nz=?,currency=? WHERE id=?",g.nx(),g.nz(),currency.name(),a[1]);return null;
-                });remember(g);realm.changed();archive(p,a[1]);
+                var post=p.getTargetBlockExact(6);require(post!=null,"请瞄准路边讲台");
+                register(p,post,a[1],a[2],a[3],a.length==6?TollCoin.parse(a[4]):TollCoin.GOLD,Integer.parseInt(a[a.length-1]));
             }
             case "purse" -> {usage(a.length==1,"purse");carriers.fund(p);}
             case "exchange" -> {usage(a.length==3,"exchange 亭号 金|银");counter(p,a[1]);TollCoin.exchange(p,TollCoin.parse(a[2]));}

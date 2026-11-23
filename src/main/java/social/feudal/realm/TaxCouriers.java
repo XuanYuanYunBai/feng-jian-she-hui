@@ -40,12 +40,12 @@ final class TaxCouriers implements Listener {
             }
             if(!clear)continue;
             double cost=distance+(w.getHighestBlockYAt(x,z,HeightMap.MOTION_BLOCKING_NO_LEAVES)>=y?30:0);
-            if(cost<best){best=cost;result=at;}
+            if(cost<best){best=cost;result=realm.roads.footing(new Point(x,y-1,z));}
         }
         return result;
     }
     static String crewId(RealmStore.Depot d){return "tax/"+d.id();}
-    private Point floor(Location at){return new Point(at.getBlockX(),(int)Math.floor(at.getY()+.15)-1,at.getBlockZ());}
+    private Point floor(Location at){return new Point(at.getBlockX(),(int)Math.floor(at.getY()-.001),at.getBlockZ());}
     private boolean reach(Team team,Location goal,String bill)throws SQLException{
         if(goal==null){team.halt();return false;}
         Point end=floor(goal),here=floor(team.porter().getLocation());
@@ -60,17 +60,17 @@ final class TaxCouriers implements Listener {
         }
         int i=trip.step;
         Point at=trip.cells.get(i);
-        if(team.near(at.feet(realm.world),.55) && i+1<trip.cells.size()){
+        if(team.near(realm.roads.footing(at),.55) && i+1<trip.cells.size()){
             i++;trip=new Itinerary(end,trip.cells,i);trips.put(worker,trip);
         }
         Point next=trip.cells.get(i),previous=trip.cells.get(Math.max(0,i-1));
-        if(!realm.roads.road(next) || !realm.roads.road(previous) ||
-                team.porter().getLocation().distanceSquared(next.feet(realm.world))>5){
+        if(!realm.roads.road(next) || !realm.roads.road(previous) || !realm.roads.traversable(previous,next) ||
+                team.porter().getLocation().distanceSquared(realm.roads.footing(next))>5){
             trips.remove(worker);team.halt();return false;
         }
         try{realm.clearance(next,bill,team);}
         catch(IllegalArgumentException ex){team.halt();return false;}
-        team.onRoad(next.feet(realm.world),next.feet(realm.world));return false;
+        team.onRoad(realm.roads.footing(next),realm.roads.footing(next),realm.roads.pace(next));return false;
     }
     void tick(RealmStore.Depot d,Container stock)throws SQLException{
         var chunk=stock.getChunk();String crewId=crewId(d);

@@ -208,9 +208,9 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
                 case "pitform" -> DiplomacyDesk.form(player(s),"设立领地矿场","在已核矿区瞄准配有支柱和工作台的坑口木桶。","realm mineopen",List.of(new DiplomacyDesk.Field("id","矿场代号","",24)));
                 case "sample","mineopen","minework","minegrant","mine" -> mines.run(player(s),a);
                 case "prices","quote","pricefilter","stall","market","bidform","askform","bid","ask","sell","buy","unlist" -> markets.run(player(s),a);
-                case "bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
+                case "bridgeform","bridgesite","bridge","crossing","toll","rate","rateform","purse","exchange","paybill","tollgrant","tollform","passage","notice","conflict","muster","peace" -> crossings.run(player(s),a);
                 case "millpermit","kitchen","mill","watermill","fieldform","field","farmjob","millup" -> mills.run(player(s),a);
-                case "room","expand","expandform","asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
+                case "room","expand","expandform","cornerfirst","cornerlast","cornerclear","asylum","people","census","housing","estates","estateform","settle","manor","surveyclaim","found","frontier","hearing","object","retract","cancelclaim","enact","permit","peer","seatvault","capital" -> manors.run(player(s),a);
                 case "diplomacy","org","document","debate","compose","cedeform","cede","cancelcede","agenda","treaty","sign","orgsign","propose","vote","withdraw","stand","pledge","accountfor","pledgeform" -> diplomacy.run(player(s),a);
                 case "acts","relinquish","heir","appoint","support","petition","confirm","vacate","yield","resist","offer","ratify" -> council.execute(s,a);
                 case "patent","register","preview","grant","extend","estimate","estate","incomepreview" -> charters.execute(s,a);

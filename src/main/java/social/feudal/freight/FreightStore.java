@@ -67,7 +67,8 @@ final class FreightStore implements AutoCloseable {
             st.execute("CREATE TABLE IF NOT EXISTS waybill(relief INTEGER PRIMARY KEY,sender TEXT NOT NULL,cargo BLOB NOT NULL,amount INTEGER NOT NULL CHECK(amount BETWEEN 1 AND 64),closed INTEGER NOT NULL DEFAULT 0)");
             st.execute("CREATE TABLE IF NOT EXISTS waybill_leg(relief INTEGER REFERENCES waybill(relief),seq INTEGER,route TEXT NOT NULL REFERENCES routes(name),bill TEXT NOT NULL UNIQUE,PRIMARY KEY(relief,seq))");
             st.execute("CREATE TABLE IF NOT EXISTS crew_return(route TEXT PRIMARY KEY REFERENCES routes(name),step INTEGER NOT NULL)");
-            st.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_cart ON trips((1)) WHERE phase NOT IN ('DELIVERED','CANCELLED')");
+            st.execute("DROP INDEX IF EXISTS one_cart");
+            st.execute("CREATE UNIQUE INDEX IF NOT EXISTS active_route ON trips(route) WHERE phase NOT IN ('DELIVERED','CANCELLED')");
         } catch (SQLException e) { db.close(); throw e; }
     }
 
@@ -115,6 +116,8 @@ final class FreightStore implements AutoCloseable {
     }
 
     void book(String id, Route route, String sender, String recipient, byte[] cargo, String material, int amount) throws SQLException {
+        String wait = unavailable(route);
+        if (wait != null) throw new SQLException(wait);
         try (var st = db.prepareStatement("""
                 INSERT INTO trips(id,route,sender,recipient,cargo,material,amount,phase) VALUES(?,?,?,?,?,?,?,'LOADING')""")) {
             st.setString(1, id); st.setString(2, route.name); st.setString(3, sender); st.setString(4, recipient);
@@ -123,20 +126,39 @@ final class FreightStore implements AutoCloseable {
         }
     }
 
-    Trip active() throws SQLException { return query(null); }
-    Trip trip(String id) throws SQLException { return query(id); }
-
-    private Trip query(String id) throws SQLException {
-        String where = id == null ? "phase NOT IN ('DELIVERED','CANCELLED')" : "id = ?";
-        try (var st = db.prepareStatement("SELECT * FROM trips JOIN routes ON trips.route=routes.name WHERE " + where)) {
-            if (id != null) st.setString(1, id);
-            try (var r = st.executeQuery()) {
-                if (!r.next()) return null;
-                return new Trip(r.getString("id"), readRoute(r), r.getString("sender"), r.getString("recipient"),
-                        r.getBytes("cargo"), r.getString("material"), r.getInt("amount"), Phase.valueOf(r.getString("phase")),
-                        r.getInt("step"), r.getString("signer"), r.getString("delivered_at"));
-            }
+    List<Trip> activeTrips() throws SQLException {
+        var result = new ArrayList<Trip>();
+        try (var q=db.createStatement(); var rows=q.executeQuery("""
+                SELECT * FROM trips JOIN routes ON trips.route=routes.name
+                WHERE phase NOT IN ('DELIVERED','CANCELLED') ORDER BY trips.rowid""")) {
+            while(rows.next()) result.add(readTrip(rows));
         }
+        return result;
+    }
+
+    private Trip readTrip(ResultSet r) throws SQLException {
+        return new Trip(r.getString("id"), readRoute(r), r.getString("sender"), r.getString("recipient"),
+                r.getBytes("cargo"), r.getString("material"), r.getInt("amount"), Phase.valueOf(r.getString("phase")),
+                r.getInt("step"), r.getString("signer"), r.getString("delivered_at"));
+    }
+    Trip trip(String id) throws SQLException {
+        try(var q=db.prepareStatement("SELECT * FROM trips JOIN routes ON trips.route=routes.name WHERE trips.id=?")){
+            q.setString(1,id);
+            try(var rows=q.executeQuery()){ return rows.next()?readTrip(rows):null; }
+        }
+    }
+
+    // Routes leaving the same sealed barrel share one porter per transport mode.
+    String unavailable(Route route) throws SQLException {
+        for(var trip:activeTrips()){
+            if(!route.sourceSeal().equals(trip.route().sourceSeal())) continue;
+            if(route.sea()==trip.route().sea()) return "本站工班正在承运 "+trip.id();
+            if(trip.phase()==Phase.LOADING) return "本站第一格正在装另一批货";
+        }
+        for(var crew:returns())
+            if(route.sourceSeal().equals(crew.route().sourceSeal()) && route.sea()==crew.route().sea())
+                return "本站工班正在沿原线回站";
+        return null;
     }
 
     record RelayLeg(int number, Route route, String bill, String phase) {}
@@ -204,6 +226,8 @@ final class FreightStore implements AutoCloseable {
         if (leg.phase()==null) {
             book(leg.bill(),leg.route(),w.sender(),w.sender(),w.cargo(),"BREAD",w.amount());
         } else {
+            String wait=unavailable(leg.route());
+            if(wait!=null)throw new SQLException(wait);
             try (var q=db.prepareStatement("UPDATE trips SET phase='LOADING' WHERE id=? AND phase='CANCELLED'")) {
                 q.setString(1,leg.bill());
                 if (q.executeUpdate()!=1) throw new SQLException("联运装货检查点已变化");
@@ -237,9 +261,11 @@ final class FreightStore implements AutoCloseable {
         finally{db.setAutoCommit(true);}
     }
     record Return(Route route,int step,String bill){}
-    Return returning()throws SQLException{
-        try(var q=db.prepareStatement("SELECT route,step,(SELECT id FROM trips WHERE route=crew_return.route AND phase='DELIVERED' ORDER BY rowid DESC LIMIT 1) AS bill FROM crew_return LIMIT 1");var r=q.executeQuery()){
-            return r.next()?new Return(route(r.getString(1)),r.getInt(2),r.getString(3)):null;
+    List<Return> returns()throws SQLException{
+        var list=new ArrayList<Return>();
+        try(var q=db.prepareStatement("SELECT route,step,(SELECT id FROM trips WHERE route=crew_return.route AND phase='DELIVERED' ORDER BY rowid DESC LIMIT 1) AS bill FROM crew_return ORDER BY route");var r=q.executeQuery()){
+            while(r.next())list.add(new Return(route(r.getString(1)),r.getInt(2),r.getString(3)));
+            return list;
         }
     }
     void walkedBack(Return trip)throws SQLException{

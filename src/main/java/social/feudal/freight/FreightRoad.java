@@ -27,8 +27,10 @@ final class FreightRoad {
     final World world;
     private final Plugin plugin;
     private final NamespacedKey station, receipt;
-    private final Set<Cell> tickets = new HashSet<>();
+    private final java.util.Map<String,Set<Cell>> routeTickets=new java.util.HashMap<>();
+    private final java.util.Map<Cell,Integer> ticketUsers=new java.util.HashMap<>();
     private final TransportCrew crews;
+    private final java.util.Map<String,java.util.Deque<Point>> approaches=new java.util.HashMap<>();
     private final NamespacedKey consignment, relief;
 
     FreightRoad(Plugin plugin, World world,TransportCrew crews,RealmService realm) {
@@ -142,8 +144,10 @@ final class FreightRoad {
         Route r = t.route();
         checkWorld(r);
         Barrel b = loading ? barrel(r.sx(), r.y(), r.sz(), r.sourceSeal()) : barrel(r.dx(), r.dy(), r.dz(), r.destSeal());
+        var crewReceipt=new NamespacedKey(plugin,"freight_stamp/"+crewId(r));
         String mark = (loading ? "load/" : "deliver/") + t.id();
-        if (!mark.equals(b.getPersistentDataContainer().get(receipt, PersistentDataType.STRING))) {
+        if (!mark.equals(b.getPersistentDataContainer().get(crewReceipt,PersistentDataType.STRING))
+                && !mark.equals(b.getPersistentDataContainer().get(receipt,PersistentDataType.STRING))) {
             var inventory = b.getSnapshotInventory();
             ItemStack original = ItemStack.deserializeBytes(t.cargo());
             ItemStack slot = inventory.getItem(0);
@@ -164,6 +168,7 @@ final class FreightRoad {
                 original=cargo(team);putCargo(team,null);
             }
             inventory.setItem(0, loading ? null : original);
+            b.getPersistentDataContainer().set(crewReceipt,PersistentDataType.STRING,mark);
             b.getPersistentDataContainer().set(receipt, PersistentDataType.STRING, mark);
             if (!b.update()) throw new IllegalStateException("站桶更新失败");
         }
@@ -172,30 +177,34 @@ final class FreightRoad {
     }
 
     private Location location(Route r, int step) {
-        return new Location(world, r.x(step) + 0.5, r.path().get(step).y() + 1.0, r.z(step) + 0.5);
+        var p=r.path().get(step);return r.sea()?p.feet(world):net.footing(p);
     }
 
     // Include clearance around the traveller, including where the surveyed road turns at a chunk edge.
     void hold(Route r, int current, int next) {
+        hold(r,r.path().get(current),r.path().get(next));
+    }
+    private void hold(Route r,Point current,Point next){
         checkWorld(r);
         var needed = new HashSet<Cell>();
-        for (int step : new int[]{current, next}) {
+        for (var point : new Point[]{current, next}) {
             for (int ox=-1;ox<=1;ox++)for(int oz=-1;oz<=1;oz++){
-                int x=r.x(step)+ox;
-                int z=r.z(step)+oz;
+                int x=point.x()+ox;
+                int z=point.z()+oz;
                 if (!world.getWorldBorder().isInside(new Location(world, x + .5, r.y(), z + .5)))
                     throw new IllegalArgumentException("路段超出当前世界边界");
                 needed.add(new Cell(x >> 4, z >> 4));
             }
         }
+        var tickets=routeTickets.computeIfAbsent(r.name(),unused->new HashSet<>());
         for (var c : Set.copyOf(tickets)) if (!needed.contains(c)) {
-            world.removePluginChunkTicket(c.x, c.z, plugin);
+            drop(c);
             tickets.remove(c);
         }
         for (var c : needed) {
             if (!tickets.contains(c)) {
                 if (!world.isChunkGenerated(c.x, c.z)) throw new IllegalArgumentException("前方路段尚未勘通");
-                world.addPluginChunkTicket(c.x, c.z, plugin);
+                if(ticketUsers.merge(c,1,Integer::sum)==1)world.addPluginChunkTicket(c.x,c.z,plugin);
                 tickets.add(c);
             }
             if (world.getChunkAt(c.x, c.z).getLoadLevel() != Chunk.LoadLevel.ENTITY_TICKING)
@@ -238,7 +247,7 @@ final class FreightRoad {
     private void putCargo(Team team,ItemStack stack){
         team.bags().setItem(team.mule()==null?0:2,stack);
     }
-    private NamespacedKey field(Route r,String name){return new NamespacedKey(plugin,"freight/"+r.sourceSeal()+"/"+name);}
+    private NamespacedKey field(Route r,String name){return new NamespacedKey(plugin,"freight/"+r.sourceSeal()+"/"+(r.sea() && !name.equals("boat")?"sea/":"")+name);}
     private void carry(Team team,Trip t,ItemStack stack){
         var data=home(t.route()).getPersistentDataContainer();
         data.set(field(t.route(),"bill"),PersistentDataType.STRING,t.id());
@@ -249,7 +258,10 @@ final class FreightRoad {
         crews.active(team,true);
     }
     boolean walk(Route r,Team team,int step){
-        Location goal=location(r,step);
+        return walkTo(r,team,r.path().get(step));
+    }
+    private boolean walkTo(Route r,Team team,Point point){
+        Location goal=r.sea()?point.feet(world):net.footing(point);
         if(r.sea()){
             Boat boat=board(r,team);var here=boat.getLocation();var delta=goal.toVector().subtract(here.toVector()).setY(0);
             if(delta.lengthSquared()<.12){boat.setVelocity(new org.bukkit.util.Vector());return true;}
@@ -258,7 +270,50 @@ final class FreightRoad {
         Location packGoal=goal;
         boolean animalReady=team.mule()==null || team.mule().getLocation().distanceSquared(packGoal)<2.25;
         if(team.porter().getLocation().distanceSquared(goal)<.48 && animalReady){team.halt();return true;}
-        team.onRoad(goal,packGoal);return false;
+        team.onRoad(goal,packGoal,net.pace(point));return false;
+    }
+    private boolean dockSurface(Point point,Route route){
+        if(!net.loaded(point))return false;
+        if(route.sea())return net.water(point);
+        return net.road(point) || registered(net.block(point)) && net.block(point).getRelative(0,1,0).isPassable()
+                && net.block(point).getRelative(0,2,0).isPassable();
+    }
+    // A crowd or world reload can displace a signed load. Rejoin the recorded route on foot.
+    boolean atDock(Trip t)throws java.sql.SQLException{
+        var r=t.route();var bin=barrel(r.dx(),r.dy(),r.dz(),r.destSeal());
+        String stamp="deliver/"+t.id();
+        if(stamp.equals(bin.getPersistentDataContainer().get(receipt,PersistentDataType.STRING))
+                || stamp.equals(bin.getPersistentDataContainer().get(new NamespacedKey(plugin,"freight_stamp/"+crewId(r)),PersistentDataType.STRING)))return true;
+        var team=team(r);
+        if(team.near(location(r,r.length()),4)){approaches.remove(t.id());return true;}
+        var loc=team.porter().getLocation();
+        var here=new Point(loc.getBlockX(),(int)Math.floor(loc.getY()-.001),loc.getBlockZ());
+        if(r.sea())here=new Point(vessel(r).getLocation().getBlockX(),r.path().getLast().y(),vessel(r).getLocation().getBlockZ());
+        if(!dockSurface(here,r))throw new IllegalArgumentException("等候原工班脚下路面或航道恢复");
+        var path=approaches.get(t.id());
+        if(path==null || path.isEmpty() || here.distance(path.getFirst())>4){
+            int closest=0;
+            for(int i=1;i<r.path().size();i++)
+                if(here.distance(r.path().get(i))<here.distance(r.path().get(closest)))closest=i;
+            Point join=r.path().get(closest);
+            if(here.distance(join)>8)throw new IllegalArgumentException("工班偏离登记货线，请引回沿线");
+            path=new java.util.ArrayDeque<>();
+            if(!here.equals(join)){
+                var link=net.survey(here,join,r.sea(),!r.sea());
+                if(link.isEmpty() || link.size()>17)throw new IllegalArgumentException("请接通工班回到原货线的实路");
+                path.addAll(link.subList(1,link.size()));
+            }
+            path.addAll(r.path().subList(closest+1,r.path().size()));
+            if(path.isEmpty())path.add(join);
+            approaches.put(t.id(),path);
+        }
+        Point next=path.getFirst();hold(r,here,next);
+        if(!dockSurface(next,r) || !r.sea() && !net.traversable(here,next)){
+            team.halt();throw new IllegalArgumentException("原工班回站的路面中断");
+        }
+        if(!r.sea())realm.clearance(next,"货-"+t.id(),team);
+        if(walkTo(r,team,next))path.removeFirst();
+        return false;
     }
     boolean readyToCarry(Trip t){
         Route r=t.route();
@@ -285,8 +340,17 @@ final class FreightRoad {
         carry(team,t,ItemStack.deserializeBytes(t.cargo()));world.save(true);return true;
     }
     void rested(Route route,Team team){crews.active(team,false);team.halt();team.porter().customName(Component.text(route.sea()?"渡口 · 船工":"货站 · 脚夫"));}
-    void release() {
-        for (var c : tickets) world.removePluginChunkTicket(c.x, c.z, plugin);
-        tickets.clear();
+    private void drop(Cell c){
+        if(ticketUsers.merge(c,-1,Integer::sum)==0){
+            ticketUsers.remove(c);world.removePluginChunkTicket(c.x,c.z,plugin);
+        }
+    }
+    void release(Route r){
+        var cells=routeTickets.remove(r.name());
+        if(cells!=null)cells.forEach(this::drop);
+    }
+    void release(){
+        for(var cell:ticketUsers.keySet())world.removePluginChunkTicket(cell.x,cell.z,plugin);
+        routeTickets.clear();ticketUsers.clear();
     }
 }

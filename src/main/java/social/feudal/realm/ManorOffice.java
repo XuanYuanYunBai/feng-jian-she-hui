@@ -21,6 +21,8 @@ final class ManorOffice implements Listener {
     final RealmService realm;
     final SettlementRegister register;
     final RealmStore s;
+    private record SurveyCorner(String manor,int x,int z){}
+    private final Map<UUID,SurveyCorner> corners=new HashMap<>();
     private final int seasonSeconds;
     private final long noticeSeconds;
     ManorOffice(RealmService realm)throws SQLException{
@@ -30,6 +32,52 @@ final class ManorOffice implements Listener {
         Bukkit.getPluginManager().registerEvents(this,realm.plugin);
         Bukkit.getScheduler().runTaskTimer(realm.plugin,this::advance,200,200);
     }
+    @EventHandler public void leave(org.bukkit.event.player.PlayerQuitEvent event){
+        corners.remove(event.getPlayer().getUniqueId());
+    }
+    private static String dimensions(Charters.Bounds b){
+        return (b.east()-b.west()+1)+" × "+(b.south()-b.north()+1)+" 格，共 "+b.area()+" 格（含边）";
+    }
+    private void measure(Player p,SettlementRegister.Manor m,String action){
+        var actor=p.getUniqueId();var b=m.estate();
+        var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();
+        body.add(text("现有庄界　"+dimensions(b)+"\n西 "+b.west()+"，北 "+b.north()+"，东 "+b.east()+"，南 "+b.south()));
+        body.add(text("沿新围界选两个对角。瞄准角上的方块再点测量，走到另一角后可双手留空、潜行按交换副手键重开经营簿。最后回庄厅验收。"));
+        if(action.equals("cornerclear"))corners.remove(actor);
+        var first=corners.get(actor);
+        if(action.equals("cornerfirst") || action.equals("cornerlast")){
+            var target=p.getTargetBlockExact(5);require(target!=null,"请在五格内瞄准院界的角");
+            if(action.equals("cornerfirst")){
+                first=new SurveyCorner(m.id(),target.getX(),target.getZ());corners.put(actor,first);
+            }else{
+                require(first!=null && first.manor().equals(m.id()),"请先实测第一角");
+                var area=new Charters.Bounds(Math.min(first.x(),target.getX()),Math.min(first.z(),target.getZ()),
+                        Math.max(first.x(),target.getX()),Math.max(first.z(),target.getZ()));
+                require(area.contains(b.west(),b.north()) && area.contains(b.east(),b.south()) && !area.equals(b),"新界须包含原庄并向外扩展，请重选第二角");
+                require((long)area.east()-area.west()<96 && (long)area.south()-area.north()<96,"庄园长宽各不能超过 96 格");
+                int[] measured={area.west(),area.north(),area.east(),area.south()};
+                p.getPersistentDataContainer().set(new NamespacedKey(realm.plugin,"yard_draft_"+m.id()),PersistentDataType.INTEGER_ARRAY,measured);
+                corners.remove(actor);first=null;
+            }
+        }
+        var key=new NamespacedKey(realm.plugin,"yard_draft_"+m.id());
+        if(action.equals("cornerfirst") || action.equals("cornerclear"))p.getPersistentDataContainer().remove(key);
+        var draft=p.getPersistentDataContainer().get(key,PersistentDataType.INTEGER_ARRAY);
+        if(draft!=null){
+            var area=new Charters.Bounds(draft[0],draft[1],draft[2],draft[3]);
+            body.add(text("拟扩至　"+dimensions(area)+"\n西 "+draft[0]+"，北 "+draft[1]+"，东 "+draft[2]+"，南 "+draft[3]));
+            buttons.add(command("在庄厅验收新界","realm expand "+m.id()+" "+draft[0]+" "+draft[1]+" "+draft[2]+" "+draft[3]));
+        }
+        if(first!=null && first.manor().equals(m.id())){
+            body.add(text("第一角　X "+first.x()+"，Z "+first.z()));
+            buttons.add(command("量眼前第二角","realm cornerlast "+m.id()));
+        }
+        buttons.add(command("量眼前第一角","realm cornerfirst "+m.id()));
+        buttons.add(command("清除本次测量","realm cornerclear "+m.id()));
+        buttons.add(command("返回庄档","realm manor "+m.id()));
+        show(p,"实地测量 · "+m.name(),body,List.of(),buttons,2);
+    }
+
     private void advance(){
         if(Bukkit.getOnlinePlayers().isEmpty())return;
         try{
@@ -213,6 +261,7 @@ final class ManorOffice implements Listener {
         buttons.add(command("跨庄赈济","realm relief "+id));
         int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
         body.add(text("在住 "+m.residents()+" 人　｜　可住 "+housing+" 人　｜　"+(housing>=m.residents()?"空位 "+(housing-m.residents()):"拥挤 "+(m.residents()-housing))+" 人"));
+        var estate=m.estate();body.add(text("庄界　"+dimensions(estate)+"\n西 "+estate.west()+"，北 "+estate.north()+"，东 "+estate.east()+"，南 "+estate.south()));
         body.add(text("业主　"+realm.display(m.owner())+"　｜　每张室内床提供 100 个住位"));
         body.add(text("厅堂　"+m.x()+"，"+m.y()+"，"+m.z()+"　｜　完成赈济 "+m.service()+" 季"));
         if(s.number("SELECT grace_until FROM manor WHERE id=?",id)>register.season())
@@ -277,23 +326,22 @@ final class ManorOffice implements Listener {
     void run(Player p,String[] a)throws SQLException{
         realm.inWorld(p);String actor=p.getUniqueId().toString();var l=p.getLocation();
         switch(a[0]){
-            case "expand","expandform" -> {
-                boolean form=a[0].equals("expandform");
-                usage(a.length==(form?2:6),"expand 庄园 西 北 东 南");
+            case "expandform","cornerfirst","cornerlast","cornerclear" -> {
+                usage(a.length==2,"请选择庄园");
+                var m=register.manor(a[1]);require(m.owner().equals(actor),"须由庄主扩院");measure(p,m,a[0]);
+            }
+            case "expand" -> {
+                usage(a.length==6,"expand 庄园 西 北 东 南");
                 var m=register.manor(a[1]);hall(p,m);require(m.owner().equals(actor),"须由庄主扩院");
                 var old=m.estate();
-                if(form){
-                    DiplomacyDesk.form(p,"扩建庄界","按方块坐标填写已围好的新院界，须包含整个原庄。","realm expand "+m.id(),
-                        List.of(new DiplomacyDesk.Field("bounds","西 北 东 南",old.west()+" "+old.north()+" "+old.east()+" "+old.south(),64)));
-                }else{
-                    var b=bounds(a,2);
-                    require(b.contains(old.west(),old.north()) && b.contains(old.east(),old.south()) && !old.equals(b),"新院界须包含完整原院并向外扩展");
-                    realm.firstHolding.border(b);
-                    var expanded=new SettlementRegister.Manor(m.id(),m.name(),m.owner(),m.x(),m.y(),m.z(),b,m.residents(),m.service(),m.cottage());
-                    int housing=inspect(expanded);register.available(actor,b,m.id());
-                    s.update("UPDATE manor SET west=?,north=?,east=?,south=?,housing=? WHERE id=?",b.west(),b.north(),b.east(),b.south(),housing,m.id());
-                    realm.changed();archive(p,m.id());
-                }
+                var b=bounds(a,2);
+                require(b.contains(old.west(),old.north()) && b.contains(old.east(),old.south()) && !old.equals(b),"新院界须包含完整原院并向外扩展");
+                realm.firstHolding.border(b);
+                var expanded=new SettlementRegister.Manor(m.id(),m.name(),m.owner(),m.x(),m.y(),m.z(),b,m.residents(),m.service(),m.cottage());
+                int housing=inspect(expanded);register.available(actor,b,m.id());
+                s.update("UPDATE manor SET west=?,north=?,east=?,south=?,housing=? WHERE id=?",b.west(),b.north(),b.east(),b.south(),housing,m.id());
+                corners.remove(p.getUniqueId());p.getPersistentDataContainer().remove(new NamespacedKey(realm.plugin,"yard_draft_"+m.id()));
+                realm.changed();archive(p,m.id());
             }
             case "room" -> {
                 usage(a.length==3 || (a.length==4 && a[3].equals("确认")),"room 庄园 大厅|私室|议事厅");
