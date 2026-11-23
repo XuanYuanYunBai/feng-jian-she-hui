@@ -80,7 +80,8 @@ final class Succession {
         s.update("UPDATE office SET start=?,heir=NULL,petition=0 WHERE id=?",fiscal.period(),id);
         s.update("DELETE FROM endorsement WHERE id=?",id);
     }
-    void vacate(String id,String actor)throws SQLException{
+    void vacate(String id,String actor)throws SQLException{vacate(id,actor,true);}
+    void vacate(String id,String actor,boolean transferPrivate)throws SQLException{
         s.atomic(()->{
             var t=law.acts(id,actor);
             if(id.equals("crown")){
@@ -100,7 +101,7 @@ final class Succession {
                 }
             }
             // Private estates of the outgoing official pass separately from the public seal.
-            for(var estate:s.titles())if(estate.charter().equals("收益封契") && estate.seal().equals(actor)){
+            if(transferPrivate)for(var estate:s.titles())if(estate.charter().equals("收益封契") && estate.seal().equals(actor)){
                 String successor=s.value("SELECT heir FROM office WHERE id=?",estate.id());
                 install(estate.id(),successor==null?heir:successor);record(estate.id(),"家产继承");
             }
@@ -121,7 +122,7 @@ final class Succession {
         s.atomic(()->{
             var t=s.title(id);
             require(!t.seal().equals(t.lawful()) && !t.lawful().equals(VACANT),"尚无待执行的任命书");
-            boolean npc=!isPlayer(t.seal());
+            boolean npc=!isPlayer(t.seal()) && !t.seal().startsWith("族人·");
             if(npc){
                 superior(id,actor);require(surrender==(support(id)<2),"当地家族依现有支持决定是否交印");
             }else require(t.seal().equals(actor),"只有实际持印人能交印或抗命");

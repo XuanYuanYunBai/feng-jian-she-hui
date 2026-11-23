@@ -11,6 +11,7 @@ final class Council {
     Council(RealmService realm)throws SQLException{
         this.realm=realm;succession=new Succession(realm.store,realm.charters.law,realm.taxes.ledger);
     }
+    private static void requireKinNumber(String who){RealmStore.require(who.matches("[0-9]{1,9}"),"本家继承提名请填写亲谱人物号；另行任命可选外人");}
     void execute(CommandSender s,String[] a)throws SQLException{
         usage(a.length>=2,a[0]+" 头衔ID");String id=a[1];
         if(a[0].equals("acts")){
@@ -24,15 +25,23 @@ final class Council {
         var p=player(s);realm.inWorld(p);String actor=p.getUniqueId().toString();
         switch(a[0]){
             case "heir","appoint" -> {
-                usage(a.length==3,a[0]+" 头衔ID 继任人");String next=realm.charters.grantee(a[2]);
+                usage(a.length==3,a[0]+" 头衔ID 继任人");String next;
+                int family=realm.families.book.family(actor);
+                if(a[0].equals("heir") && family!=0){
+                    requireKinNumber(a[2]);int person=Integer.parseInt(a[2]);
+                    realm.families.book.own(family,person);RealmStore.require(person!=realm.families.book.rep(family),"请提名另一名本家成员");next=FamilyRegister.personal(person);
+                    realm.store.atomic(()->{succession.nominate(id,actor,next);realm.store.update("INSERT OR REPLACE INTO family_nomination VALUES(?,?)",id,person);return null;});
+                    break;
+                }
+                next=realm.charters.grantee(a[2]);
                 if(a[0].equals("heir"))succession.nominate(id,actor,next);else succession.appoint(id,actor,next);
             }
             case "support" -> succession.sponsor(id,actor,p.getLocation().getBlockX()>>4,p.getLocation().getBlockZ()>>4);
             case "petition" -> succession.petition(id,actor);
             case "confirm" -> succession.confirm(id,actor);
             case "relinquish" -> succession.relinquish(id,actor);
-            case "vacate" -> succession.vacate(id,actor);
-            case "yield","resist" -> succession.seal(id,actor,a[0].equals("yield"));
+            case "vacate" -> succession.vacate(id,actor,realm.families.book.family(actor)==0);
+            case "yield","resist" -> succession.seal(id,a[0].equals("yield") && realm.families.book.delegated(actor,id,"交印")?realm.store.title(id).seal():actor,a[0].equals("yield"));
             case "offer" -> {
                 usage(a.length>=4,"offer 头衔ID 王号|独立 协议条件");
                 succession.offer(id,actor,a[2],String.join(" ",Arrays.copyOfRange(a,3,a.length)));

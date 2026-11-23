@@ -71,7 +71,7 @@ final class RefugeOffice {
             int bread=0;
             for(var stack:pantry.getInventory().getContents())if(ReliefOffice.plain(stack))bread+=stack.getAmount();
             int capacity=Math.min(spare,bread*100-host.residents()-waiting);
-            int people=Math.min(Math.min(100,origin.residents()),Math.min(missing,capacity));
+            int people=Math.min(Math.min(100,realm.families.life.freeResidents(origin.id())),Math.min(missing,capacity));
             if(people<=0)return false;
             s.atomic(()->{
                 s.update("INSERT INTO migration(source,dest,season,people,route,reverse,status) VALUES(?,?,?,?,?,?,'候发')",

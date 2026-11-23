@@ -26,7 +26,7 @@ final class ManorRooms implements Listener {
         s.update("""
             CREATE TABLE IF NOT EXISTS manor_room(manor TEXT REFERENCES manor(id),kind TEXT,x INTEGER,y INTEGER,z INTEGER,
             PRIMARY KEY(manor,kind))""");
-        try(var q=s.sql("SELECT r.x,r.y,r.z,m.owner FROM manor_room r JOIN manor m ON m.id=r.manor WHERE kind='私柜'");var row=q.executeQuery()){
+        try(var q=s.sql("SELECT r.x,r.y,r.z,m.id FROM manor_room r JOIN manor m ON m.id=r.manor WHERE kind='私柜'");var row=q.executeQuery()){
             while(row.next())cabinets.put(realm.world.getBlockAt(row.getInt(1),row.getInt(2),row.getInt(3)),row.getString(4));
         }
         Bukkit.getPluginManager().registerEvents(this,realm.plugin);
@@ -132,24 +132,29 @@ final class ManorRooms implements Listener {
             var cabinet=(Barrel)bins.getFirst().getState();
             for(var viewer:List.copyOf(cabinet.getInventory().getViewers()))if(!viewer.equals(p))viewer.closeInventory();
             s.atomic(()->{mark(m.id(),"私床",bed.getFirst());mark(m.id(),"私柜",bins.getFirst());return null;});
-            if(old!=null)cabinets.remove(old);cabinets.put(bins.getFirst(),m.owner());
+            if(old!=null)cabinets.remove(old);cabinets.put(bins.getFirst(),m.id());
             s.update("UPDATE manor SET housing=? WHERE id=?",realm.manors.capacity(m),m.id());
         }
         realm.changed();realm.manors.archive(p,m.id());
+    }
+    private String cabinetOwner(Block block){
+        String manor=cabinets.get(block);if(manor==null)return null;
+        try{return realm.manors.register.manor(manor).owner();}
+        catch(SQLException | IllegalArgumentException ex){return "待核权属";}
     }
     private boolean locked(Inventory inventory){
         var l=inventory.getLocation();return l!=null && cabinets.containsKey(l.getBlock());
     }
     @EventHandler(ignoreCancelled=true) public void open(InventoryOpenEvent e){
         var l=e.getInventory().getLocation();if(l==null)return;
-        String owner=cabinets.get(l.getBlock());
+        String owner=cabinetOwner(l.getBlock());
         if(owner!=null && !owner.equals(e.getPlayer().getUniqueId().toString())){e.setCancelled(true);e.getPlayer().sendMessage("这是家族私柜。");}
     }
     @EventHandler(ignoreCancelled=true) public void move(InventoryMoveItemEvent e){
         if(locked(e.getSource()) || locked(e.getDestination()))e.setCancelled(true);
     }
     @EventHandler(ignoreCancelled=true) public void dismantle(BlockBreakEvent e){
-        String owner=cabinets.get(e.getBlock());
+        String owner=cabinetOwner(e.getBlock());
         if(owner!=null && !owner.equals(e.getPlayer().getUniqueId().toString()))e.setCancelled(true);
     }
     @EventHandler(ignoreCancelled=true) public void blast(EntityExplodeEvent e){e.blockList().removeIf(cabinets::containsKey);}

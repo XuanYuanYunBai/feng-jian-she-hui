@@ -80,7 +80,7 @@ final class TaxRemissions {
     // Called inside the transaction that creates the assessment. Net dues, quota and the writ commit together.
     int settle(RealmStore.Depot d,int period,int gross)throws SQLException {
         var w=latest(d.id(),period);
-        if(w==null || w.state().equals("已撤回"))return 0;
+        if(w==null || w.state().equals("已撤回") || w.state().equals("授权失效"))return 0;
         String state;int spared=0;
         if(!w.state().equals("已核准"))state="未获会签";
         else if(!rights(w,d) || !s.title(w.right()).seal().equals(w.signer()))state="授权失效";

@@ -51,7 +51,7 @@ final class SmithyOffice {
         RealmService.usage(a.length==2 || a.length==3,"smith 庄园 [登记|派工]");
         var m=r.manors.register.manor(a[1]);
         if(a.length==3){
-            require(r.manors.register.manages(m,p.getUniqueId().toString()),"请由业主或本处公产持印人派工");
+            require(r.manors.register.manages(m,p.getUniqueId().toString()) || (a[2].equals("派工") && r.families.life.stewards(p.getUniqueId().toString(),m.id(),"铁工")),"请由业主、公产持印人或受托的出师铁匠派工");
             if(a[2].equals("登记")){
                 var f=fixtures(m,p.getTargetBlockExact(6));var b=f.anvil;
                 require(r.rooms.site(m.id(),"私柜")==null || !r.rooms.site(m.id(),"私柜").equals(f.bin),"家用私柜不能兼作料桶");

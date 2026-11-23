@@ -160,7 +160,7 @@ final class TaxOffice {
         var d=ledger.depot(a[1]);nearby(p,realm.markers.counter(d.x(),d.z()));
         int period=a.length==3?Integer.parseInt(a[2]):ledger.period();
         String title=ledger.account(d.id(),period).title();
-        require(realm.store.title(title).seal().equals(p.getUniqueId().toString()),"请由本税期期初权利人的持印人提运");
+        require(realm.store.title(title).seal().equals(p.getUniqueId().toString()) || realm.families.book.delegated(p.getUniqueId().toString(),title,"亲收税箱"),"须持本期税权官印或有效的亲收委托");
         var bin=realm.fixtures.bin(d.x(),d.z(),"stock",d.id());require(bin!=null,"请登记产地仓箱");
         stage(d,bin);var inv=WarehouseFixtures.inventory(bin);
         int amount=0;
@@ -174,7 +174,7 @@ final class TaxOffice {
         require(amount>0,"仓箱中没有可提的当期税箱，或背包已满");p.sendMessage("已从产地仓箱提取 "+amount+" 份小麦，请随身运往公库");
     }
     boolean canRead(CommandSender sender,String title)throws SQLException{
-        return sender.hasPermission("feudal.realm.admin") || sender instanceof Player p && realm.store.title(title).seal().equals(p.getUniqueId().toString());
+        return sender.hasPermission("feudal.realm.admin") || sender instanceof Player p && (realm.store.title(title).seal().equals(p.getUniqueId().toString()) || realm.families.book.delegated(p.getUniqueId().toString(),title,"亲收税箱"));
     }
     void execute(CommandSender s,String[] a)throws SQLException{
         switch(a[0]){

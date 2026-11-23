@@ -114,6 +114,7 @@ final class FirstHolding implements Listener {
                 var pos=site(p);require(pos!=null && pos.length==3,"先在院心定厅位");
                 require(p.getLocation().distanceSquared(new Location(realm.world,pos[0]+.5,pos[1]+.5,pos[2]+.5))<=64,"请回厅位八格内查验");
                 String home="h_"+p.getUniqueId().toString().replace("-","").substring(0,20);
+                if(store.value("SELECT id FROM manor WHERE id=?",home)!=null)home="hf_"+realm.families.book.family(actor);
                 String name=args.length>1?String.join(" ",java.util.Arrays.copyOfRange(args,1,args.length)):p.getName()+"庄";
                 var m=new SettlementRegister.Manor(home,name,actor,pos[0],pos[1],pos[2],yard(pos[0],pos[2]),100,0,true);
                 border(m.estate());int capacity=realm.manors.inspect(m);realm.manors.register.estate(m,capacity);realm.changed();
@@ -156,7 +157,7 @@ final class FirstHolding implements Listener {
             buttons.add(command("重新查验","realm start"));buttons.add(command("改在脚下定址","realm stakehome"));
         }
         if(pos!=null)buttons.add(command("清除选址","realm clearhome"));
-        buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 
@@ -182,7 +183,7 @@ final class FirstHolding implements Listener {
             }
             buttons.add(command("水磨田务","realm mill "+mill));
         }
-        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
+        buttons.add(command("庄园档案","realm manor "+m.id()));buttons.add(command("家族档案","realm family"));buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));
         show(p,title,body,List.of(),buttons,2);
     }
 }

@@ -8,7 +8,12 @@ final class CharterOffice {
     final Charters law;
     private final RealmService realm;
     CharterOffice(RealmService realm){this.realm=realm;law=new Charters(realm.store);}
-    String grantee(String name){
+    String grantee(String name)throws SQLException{
+        if(name.matches("族人[0-9]{1,9}")){
+            int id=Integer.parseInt(name.substring(2));var person=realm.families.book.person(id);
+            RealmStore.require(person.alive() && person.age(realm.families.book.season())>=18,"受任族人须在世且成年");
+            return realm.families.book.actorFor(id);
+        }
         if(name.startsWith("npc-") && name.matches("npc-[\\p{L}0-9_-]{1,20}"))return name;
         return realm.actor(name);
     }

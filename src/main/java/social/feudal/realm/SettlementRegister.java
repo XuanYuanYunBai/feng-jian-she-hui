@@ -40,6 +40,7 @@ final class SettlementRegister {
         s.update("""
             CREATE TABLE IF NOT EXISTS land_objection(claim INTEGER REFERENCES claim(id),x INTEGER,z INTEGER,
             actor TEXT,reason TEXT,PRIMARY KEY(claim,x,z,actor))""");
+        s.update("CREATE TABLE IF NOT EXISTS partition_claim(claim INTEGER PRIMARY KEY REFERENCES claim(id),person INTEGER NOT NULL)");
         TerritorialControl.schema(s);
         s.update("CREATE TABLE IF NOT EXISTS frontier_seal(title TEXT PRIMARY KEY REFERENCES title(id),issuer TEXT REFERENCES title(id),west INTEGER,north INTEGER,east INTEGER,south INTEGER)");
         s.update("CREATE TABLE IF NOT EXISTS peerage(title TEXT PRIMARY KEY REFERENCES nation(id),state TEXT NOT NULL,reason TEXT NOT NULL)");
@@ -105,9 +106,22 @@ final class SettlementRegister {
             if(s.number("SELECT count(*) FROM manor WHERE owner=?",actor)>0){
                 require(!m.cottage(),"安家只适用于首庄");
                 String source=s.value("SELECT id FROM manor WHERE owner=? AND residents>=400 AND last_season=? ORDER BY residents DESC,id LIMIT 1",actor,season());
+                if(source!=null && s.value("SELECT name FROM sqlite_schema WHERE name='kin'")!=null)
+                    require(s.number("SELECT residents-(SELECT count(*) FROM kin WHERE home=? AND death IS NULL) FROM manor WHERE id=?",source,source)>=300,"分庄迁出人口不能重复计算具名家人");
                 require(source!=null,"分庄需要从已结季账的聚落实迁 300 人，原庄至少留 100 人");
                 s.update("UPDATE manor SET residents=residents-300 WHERE id=?",source);
                 residents=300;
+            }
+            else if(s.value("SELECT name FROM sqlite_schema WHERE name='family'")!=null &&
+                    s.number("SELECT count(*) FROM family WHERE account=? AND ended IS NOT NULL",actor)>0){
+                String source=s.value("""
+                    SELECT m.id FROM manor m JOIN family_guest g ON g.manor=m.id AND g.host=m.owner
+                    JOIN family f ON f.id=g.guest WHERE f.account=? AND f.ended IS NULL AND m.residents>=200
+                    AND m.residents-(SELECT count(*) FROM kin k WHERE k.home=m.id AND k.death IS NULL)>=100
+                    AND g.settlers>=100 ORDER BY m.id LIMIT 1""",actor);
+                require(source!=null,"重立家门须由有余户的寄居庄拨出一百居民，请主人办理迁户许可");
+                s.update("UPDATE manor SET residents=residents-100 WHERE id=?",source);
+                s.update("UPDATE family_guest SET settlers=0 WHERE manor=? AND guest=(SELECT id FROM family WHERE account=? AND ended IS NULL)",source,actor);
             }
             s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,residents,cottage,last_season,housing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     id,m.name(),actor,m.x(),m.y(),m.z(),b.west(),b.north(),b.east(),b.south(),residents,m.cottage()?1:0,season(),capacity);return null;
@@ -215,7 +229,15 @@ final class SettlementRegister {
                 require(touches,"无异议部分须与旧疆界相接");
             }else{
                 boolean inside=c.type().equals("入帝");
-                s.titleRow(c.title(),m.name(),inside?"地主":"伯爵",null,"建领公议",actor,cx,cz);
+                String holder=actor;
+                int nominated=s.number("SELECT person FROM partition_claim WHERE claim=?",n);
+                if(nominated!=0){
+                    holder=s.value("""
+                        SELECT CASE WHEN f.rep=k.id THEN f.account ELSE '族人·'||k.id END FROM kin k JOIN family f ON f.id=k.family
+                        WHERE k.id=? AND k.death IS NULL AND f.ended IS NULL""",nominated);
+                    require(holder!=null,"预定承领人已故，请撤回后重新公议");
+                }
+                s.titleRow(c.title(),m.name(),inside?"地主":"伯爵",null,"建领公议",holder,cx,cz);
                 s.politics.newNation(c.title(),inside,false);
                 s.update("INSERT INTO capital VALUES(?,?)",c.title(),m.id());
             }

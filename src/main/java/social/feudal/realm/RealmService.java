@@ -27,6 +27,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final FoundingVillages villages;
     final RefugeOffice refuge;
     final ManorRooms rooms;
+    final FamilyOffice families;
     final MineralRegister minerals;
     final MineOffice mines;
     final WorkAllocation labor;
@@ -68,6 +69,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         Bukkit.getPluginManager().registerEvents(new ProductionTools(),plugin);
         firstHolding=new FirstHolding(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
+        families=new FamilyOffice(this);
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
             Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);
@@ -105,6 +107,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     }
     String display(String actor){
         if(actor==null)return "待任";
+        if(actor.startsWith("族人·") && families!=null)try{return families.book.nameOf(actor);}catch(SQLException | IllegalArgumentException ignored){return actor;}
         try {
             var p=Bukkit.getOfflinePlayer(UUID.fromString(actor));
             return p.getName()==null?actor:p.getName();
@@ -116,13 +119,14 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             String action=a.length==0?"help":a[0].toLowerCase(Locale.ROOT);
             if(a.length==0 && s instanceof Player p) action=!store.ready() || firstHolding.newcomer(p)?"start":"atlas";
             if(a.length>0)a[0]=action;
+            if(s instanceof Player person && !action.equals("family") && store.ready())families.checkPublicAct(person,action,a);
             if(Set.of("start","seekland","clearhome","stakehome","firstname","firstdeed","firstmill").contains(action)){
                 firstHolding.run(player(s),a);return true;
             }
             if(action.equals("buildings")){BuildingAtlas.open(this,player(s),a);return true;}
             if(action.equals("travel")){var p=player(s);inWorld(p);travel.report(p);return true;}
             if(action.equals("help")){
-                s.sendMessage("/realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
+                s.sendMessage("/realm family 家族与继承 · /realm start 安家手册 · /realm atlas 政治图册 · map 手持图 · here 地方志 · depots 税仓坐标 · travel 行旅与货运 · prices 各地行情");
                 s.sendMessage("/realm ledger 税账 · collect 仓名 · deposit 交箱 · treasury 头衔 · gift 头衔 粮数");
                 s.sendMessage("/realm desk 税仓ID、stock 税仓ID、vault 头衔ID · 瞄准改建后的讲台或仓箱登记");
                 s.sendMessage("/realm preview 或 grant 授封 · estimate 或 extend 追加辖地 · estate 授益");
@@ -142,6 +146,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "family" -> families.run(player(s),a);
                 case "foundingvillages" -> {
                     RealmStore.require(s.hasPermission("feudal.realm.admin"),"需要开服管理权限");
                     usage(a.length==1 || a.length==4,"foundingvillages [辖区代号 中心X 中心Z]");

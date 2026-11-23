@@ -68,6 +68,14 @@ final class BlueAtlas implements Runnable {
                             .position(r.getInt(3)+.5,r.getInt(4)+1.5,r.getInt(5)+.5).defaultIcon().build());
                 }
             }
+            var offices=new MarkerSet("治所与当代持印人",true,true);
+            for(var t:s.titles()){
+                String holder=s.value("SELECT k.name FROM family f JOIN kin k ON k.id=f.rep WHERE f.account=? AND f.ended IS NULL",t.seal());
+                if(holder==null && t.seal().startsWith("族人·"))holder=s.value("SELECT name FROM kin WHERE id=?",t.seal().substring(3));
+                if(holder==null)continue;
+                offices.put(t.id(),POIMarker.builder().label(escape(t.name())).detail("现任持印人　"+escape(holder))
+                    .position(t.x()*16+8,70,t.z()*16+8).defaultIcon().build());
+            }
             var deeds=new MarkerSet("待签割地文书",true,false);
             try(var q=s.sql("""
                     SELECT c.treaty,t.name,c.donor,c.recipient,c.west,c.north,c.east,c.south
@@ -100,7 +108,7 @@ final class BlueAtlas implements Runnable {
             }
             for(var map:world.getMaps()){
                 var sets=map.getMarkerSets();sets.put("feudal-countries",countries);sets.put("feudal-empire",empire);
-                sets.put("feudal-control",transfers);sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
+                sets.put("feudal-offices",offices);sets.put("feudal-control",transfers);sets.put("feudal-estates",estates);sets.put("feudal-hearings",hearings);
                 sets.put("feudal-crossings",tolls);sets.put("feudal-deeds",deeds);sets.put("feudal-network",network);sets.put("feudal-markets",markets);sets.put("feudal-ferries",ferries);
             }
             previous=api;published=realm.mapRevision;

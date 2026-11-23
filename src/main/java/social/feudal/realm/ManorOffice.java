@@ -147,6 +147,8 @@ final class ManorOffice implements Listener {
                 service=CASE WHEN ? AND settled>=? THEN service+1 ELSE 0 END,settled=0 WHERE id=?""",
                     closing,housing,season,meal.credit(),meal.growthRemainder(),meal.shortages(),
                     meal.shortfall()==0 && surplus>=3,seasonSeconds,m.id());
+            if(meal.deaths()>0)realm.families.book.famine(m.id(),closing,season);
+            realm.families.life.yearAt(m.id(),season,meal.births());
             return null;
         });
         realm.changed();
