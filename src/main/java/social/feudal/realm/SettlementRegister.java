@@ -30,6 +30,7 @@ final class SettlementRegister {
             });
         }
         s.update("CREATE TABLE IF NOT EXISTS population_turnover(manor TEXT REFERENCES manor(id),season INTEGER,people INTEGER NOT NULL,PRIMARY KEY(manor,season))");
+        s.update("CREATE TABLE IF NOT EXISTS service_audit(manor TEXT REFERENCES manor(id),season INTEGER,reserve_ok INTEGER,full_time INTEGER,PRIMARY KEY(manor,season))");
         s.update("CREATE TABLE IF NOT EXISTS pantry_snapshot(manor TEXT REFERENCES manor(id),season INTEGER,stock INTEGER,PRIMARY KEY(manor,season))");
         s.update("""
             CREATE TABLE IF NOT EXISTS population_season(manor TEXT REFERENCES manor(id),season INTEGER,

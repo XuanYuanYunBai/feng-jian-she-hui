@@ -193,6 +193,7 @@ final class ManorOffice implements Listener {
             s.update("DELETE FROM pantry_snapshot WHERE manor=? AND season<=?",m.id(),season);
             s.update("INSERT INTO population_season VALUES(?,?,?,?,?,?,?,?,?)",m.id(),season,m.residents(),housing,
                     meal.bread(),meal.shortfall(),births,meal.deaths()+turnover,closing);
+            s.update("INSERT INTO service_audit SELECT id,?,?,settled>=? FROM manor WHERE id=?",season,surplus>=3,seasonSeconds,m.id());
             if(turnover>0)s.update("INSERT INTO population_turnover VALUES(?,?,?)",m.id(),season,turnover);
             s.update("""
                 UPDATE manor SET residents=?,housing=?,last_season=?,ration_credit=?,growth_remainder=?,shortages=?,
@@ -255,9 +256,36 @@ final class ManorOffice implements Listener {
     private void hall(Player p,SettlementRegister.Manor m){
         require(p.getLocation().distanceSquared(new Location(realm.world,m.x()+.5,m.y()+.5,m.z()+.5))<=64,"请到庄宅办事厅八格内");
     }
+    void serviceAudit(Player p,String id,int page)throws SQLException{
+        realm.inWorld(p);
+        var m=register.manor(id);
+        int size=s.number("SELECT count(*) FROM population_season WHERE manor=?",id);
+        int pages=Math.max(1,Math.ceilDiv(size,6));
+        require(page>=1 && page<=pages,"没有这页季账");
+        var body=new ArrayList<DialogBody>();var buttons=new ArrayList<ActionButton>();
+        body.add(text(m.name()+"　｜　连续公共供养 "+m.service()+" 季"));
+        body.add(text("足额口粮、季末至少三份公粮、全季供养时间三项俱足，才计入连续服务。"));
+        try(var q=s.sql("""
+            SELECT p.season,p.opening,p.bread,p.shortfall,p.closing,a.reserve_ok,a.full_time
+            FROM population_season p LEFT JOIN service_audit a USING(manor,season)
+            WHERE p.manor=? ORDER BY p.season DESC LIMIT 6 OFFSET ?""",id,(page-1)*6);var r=q.executeQuery()){
+            while(r.next()){
+                String finding=r.getObject(6)==null?"旧季未留公粮及时间凭据":
+                    (r.getInt(4)==0 && r.getBoolean(6) && r.getBoolean(7)?"供养成立":"未达标")+
+                    "　公粮"+(r.getBoolean(6)?"足":"不足")+"　"+(r.getBoolean(7)?"已满一季":"未满一季");
+                body.add(text("第 "+r.getInt(1)+" 季　"+r.getInt(2)+" → "+r.getInt(5)+" 人　开粮 "+r.getInt(3)+" 个　缺 "+r.getInt(4)+" 人份\n"+finding));
+            }
+        }
+        if(size==0)body.add(text("首季尚未结账。"));
+        if(page>1)buttons.add(command("较新季报","realm serviceaudit "+id+" "+(page-1)));
+        if(page<pages)buttons.add(command("较早季报","realm serviceaudit "+id+" "+(page+1)));
+        buttons.add(command("返回庄档","realm manor "+id));
+        show(p,"公共供养季账　"+page+"/"+pages,body,List.of(),buttons,2);
+    }
     void archive(Player p,String id)throws SQLException{
         var m=register.manor(id);var buttons=new ArrayList<ActionButton>();var body=new ArrayList<DialogBody>();
         buttons.add(command("建筑图谱","realm buildings"));
+        buttons.add(command("历季公共供养账","realm serviceaudit "+id));
         buttons.add(command("跨庄赈济","realm relief "+id));
         int housing=s.number("SELECT housing FROM manor WHERE id=?",id);
         body.add(text("在住 "+m.residents()+" 人　｜　可住 "+housing+" 人　｜　"+(housing>=m.residents()?"空位 "+(housing-m.residents()):"拥挤 "+(m.residents()-housing))+" 人"));

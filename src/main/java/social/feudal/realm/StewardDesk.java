@@ -39,6 +39,7 @@ final class StewardDesk {
         var heirs=book.successors(rep);
         body.add(text(heirs.isEmpty()?"家档尚无可接续的男性。成年代表可在居住庄议婚，婚后由父家开启养育。":"家档可接续 "+heirs.size()+" 人　首位 "+book.person(heirs.getFirst()).name()));
         buttons.add(command("婚书与养育","realm family 婚约"));buttons.add(command("生前核对继承","realm family 继承"));
+        buttons.add(command("本家效忠誓书","realm fealty"));
         for(String t:titles)buttons.add(command("治领 · "+s.title(t).name(),"realm stewardship "+t));
         buttons.add(command("脚下路况与运力","realm travel"));buttons.add(command("公共养路簿","realm works"));buttons.add(command("商站与交易","realm commerce"));buttons.add(command("家族档案","realm family"));
         buttons.add(command("建筑图谱","realm buildings"));buttons.add(command("政治图册","realm atlas"));

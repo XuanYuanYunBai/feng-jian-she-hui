@@ -37,7 +37,7 @@ final class Council {
                 if(a[0].equals("heir"))succession.nominate(id,actor,next);else succession.appoint(id,actor,next);
             }
             case "support" -> succession.sponsor(id,actor,p.getLocation().getBlockX()>>4,p.getLocation().getBlockZ()>>4);
-            case "petition" -> succession.petition(id,actor);
+            case "petition" -> {realm.fealty.ledger.requireSworn(id);succession.petition(id,actor);}
             case "confirm" -> succession.confirm(id,actor);
             case "relinquish" -> succession.relinquish(id,actor);
             case "vacate" -> succession.vacate(id,actor,realm.families.book.family(actor)==0);

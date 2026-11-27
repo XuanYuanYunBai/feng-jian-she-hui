@@ -44,6 +44,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
     final social.feudal.transport.PlayerTravel travel;
     final MarketOffice markets;
     final Council council;
+    final FealtyCourt fealty;
     final CharterOffice charters;
     final DepotMarkers markers;
     final WarehouseFixtures fixtures;
@@ -72,6 +73,7 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
         firstHolding=new FirstHolding(this);steward=new StewardDesk(this);villages=new FoundingVillages(this);refuge=new RefugeOffice(this);
         travel=new social.feudal.transport.PlayerTravel(plugin,world,roads);
         families=new FamilyOffice(this);council.succession.families=families.book;
+        fealty=new FealtyCourt(this);
         if(store.ready()) restoreMap();
         if(Bukkit.getPluginManager().getPlugin("BlueMap")!=null)
             Bukkit.getScheduler().runTaskTimer(plugin,new BlueAtlas(this),40,100);
@@ -148,6 +150,8 @@ public final class RealmService implements CommandExecutor,AutoCloseable {
             }
             RealmStore.require(store.ready(),"帝国尚未建立，管理员使用 /realm init 在线君主名");
             switch(action){
+                case "fealty","swear" -> fealty.open(player(s),a);
+                case "serviceaudit" -> {usage(a.length==2 || a.length==3,"serviceaudit 庄园 [页]");manors.serviceAudit(player(s),a[1],a.length==3?Integer.parseInt(a[2]):1);}
                 case "family" -> families.run(player(s),a);
                 case "journal" -> steward.open(player(s),a);
                 case "commerce" -> steward.commerce(player(s));

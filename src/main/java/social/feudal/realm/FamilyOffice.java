@@ -254,6 +254,10 @@ final class FamilyOffice implements Listener {
             body.add(text("家籍 #"+f+"　家徽　"+s.value("SELECT emblem FROM family WHERE id=?",f)+"　家中在世 "+book.living(f).size()+" 人"));
             if(self.age(book.season())<18){int guardian=life.regent(rep);body.add(text("幼主摄政　"+(guardian==0?"暂维持日常收支":book.person(guardian).name())));}
             if(s.number("SELECT count(*) FROM life_receipt l JOIN kin k ON k.id=l.person WHERE k.family=?",f)>0)body.add(text(lastReceipt(f)));
+            if(s.number("SELECT count(*) FROM title v JOIN title l ON l.id=v.parent WHERE v.seal=? OR l.seal=?",actor,actor)>0){
+                body.add(text("家主换代后，须与各直属封君、封臣重行效忠礼。"));
+                buttons.add(command("核对当代誓书","realm fealty"));
+            }
             buttons.add(command("题家名与家徽","realm family 题名表"));
         }
         for(String page:List.of("本家","亲谱","婚约","家产","继承"))if(!op.equals(page))buttons.add(command(page.equals("继承")?"继承预览":page,"realm family "+page));

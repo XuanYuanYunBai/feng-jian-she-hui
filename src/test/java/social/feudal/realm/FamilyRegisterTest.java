@@ -18,6 +18,75 @@ class FamilyRegisterTest {
         s.update("INSERT INTO manor(id,name,owner,x,y,z,west,north,east,south,residents,housing) VALUES('oak','橡庄',?,0,70,0,-8,-8,8,8,100,600),('ash','梣庄',?,80,70,0,70,-8,88,8,100,600)",A,B);
         return s;
     }
+    @Test void retiringLordEndsEveryPersonalOathAndLeavesUnrelatedFiefsAlone()throws Exception{
+        try(var s=init()){
+            var book=new FamilyRegister(s);
+            int house=book.found(A,"西家","封君","船"),lord=book.rep(house);
+            int son=book.addPerson(house,"西嗣",-80,"oak",lord,null,null,"男");
+            book.found(B,"东家","邻君","树");
+            s.titleRow("west","西领","公爵",null,"建领公议",A,10,10);
+            s.titleRow("east","东领","公爵",null,"建领公议",B,20,20);
+            s.titleRow("one","南庄","庄园","west","收益封契","npc-one",11,10);
+            s.titleRow("two","北庄","庄园","west","收益封契","npc-two",12,10);
+            s.titleRow("other","东庄","庄园","east","收益封契","npc-other",21,20);
+            s.titleRow("own","自持庄","庄园","west","收益封契",A,13,10);
+            var court=new Fealty(s);
+            court.requireSworn("own");
+            court.requireSworn("east");
+            for(String fief:List.of("one","two","other")){
+                var b=court.bond(fief);
+                assertThrows(IllegalArgumentException.class,()->court.sign(fief,"无关人",b.vassal(),b.ruler(),0));
+                court.sign(fief,b.lord().seal(),b.vassal(),b.ruler(),0);
+                court.requireSworn(fief);
+            }
+            book.retire(house,son);
+            for(String fief:List.of("one","two"))assertThrows(IllegalArgumentException.class,()->court.requireSworn(fief));
+            assertEquals(2,s.number("SELECT count(*) FROM fealty WHERE state='已终止'"));
+            court.requireSworn("other");
+        }
+    }
+    @Test void eachSideMustRenewInPersonAfterSuccession()throws Exception{
+        int currentId;
+        try(var s=init()){
+            var book=new FamilyRegister(s);
+            int west=book.found(A,"西家","封君","船"), east=book.found(B,"东家","封臣","树");
+            int lord=book.rep(west),vassal=book.rep(east);
+            int son=book.addPerson(west,"西嗣",-80,"oak",lord,null,null,"男");
+            int heir=book.addPerson(east,"东嗣",-80,"ash",vassal,null,null,"男");
+            s.titleRow("west","西领","公爵",null,"建领公议",A,10,10);
+            s.titleRow("rent","地租","地租","west","收益封契",B,12,12);
+            var court=new Fealty(s);
+            var b=court.bond("rent");
+            assertThrows(IllegalArgumentException.class,()->court.requireSworn("rent"));
+            court.sign("rent",B,b.vassal(),b.ruler(),0);
+            int receipt=court.current(b).id();
+            assertThrows(IllegalArgumentException.class,()->court.sign("rent",B,b.vassal(),b.ruler(),receipt));
+            court.sign("rent",A,b.vassal(),b.ruler(),receipt);
+            court.requireSworn("rent");
+            book.die(B,vassal);book.assume(east,heir);
+            var second=court.bond("rent");
+            assertEquals("已终止",s.value("SELECT state FROM fealty WHERE id=?",receipt));
+            assertEquals("待宣誓",court.current(second).state());
+            assertThrows(IllegalArgumentException.class,()->court.sign("rent",B,b.vassal(),b.ruler(),0));
+            court.sign("rent",B,second.vassal(),second.ruler(),0);
+            int offered=court.current(second).id();
+            book.die(A,lord);book.assume(west,son);
+            var third=court.bond("rent");
+            assertThrows(IllegalArgumentException.class,()->court.sign("rent",A,third.vassal(),third.ruler(),offered));
+            court.sign("rent",B,third.vassal(),third.ruler(),0);
+            currentId=court.current(third).id();
+            court.sign("rent",A,third.vassal(),third.ruler(),currentId);
+            assertThrows(IllegalArgumentException.class,()->court.sign("rent",A,third.vassal(),third.ruler(),currentId));
+        }
+        try(var s=new RealmStore(dir.resolve("realm.sqlite"))){
+            var court=new Fealty(s);
+            assertEquals(currentId,court.current(court.bond("rent")).id());
+            court.requireSworn("rent");
+            s.update("UPDATE title SET seal='待任' WHERE id='west'");
+            s.update("UPDATE title SET seal=lawful WHERE id='west'");
+            assertThrows(IllegalArgumentException.class,()->court.requireSworn("rent"));
+        }
+    }
     @Test void deathThenReopenSeparatesSealCargoAndHome()throws Exception{
         int f,first,sib;
         try(var s=init()){

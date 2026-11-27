@@ -53,6 +53,7 @@ final class RealmDialogs {
                 text("驻地税权　" + (beneficiary==null?t.name():s.title(beneficiary).name()) + "\n公库存粮　" + (p.getUniqueId().toString().equals(t.seal())?realm.taxes.balance(t):"仅持印人可查"))));
         var buttons=new ArrayList<ActionButton>();
         buttons.add(command("领地人口与领印","realm territory "+t.id()));
+        if(t.parent()!=null)buttons.add(command("查本领效忠誓书","realm fealty "+t.id()));
         for(var region:realm.manors.register.census())if(region.id().equals(t.id())){
             buttons.add(command("辖内聚落","realm people "+t.id()));
             body.add(text("居民 "+region.population()+" 人　｜　直辖 "+region.direct()+" 人　｜　封臣辖下 "+(region.population()-region.direct())+" 人"));

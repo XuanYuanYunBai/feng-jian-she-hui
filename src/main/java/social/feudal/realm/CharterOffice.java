@@ -25,6 +25,7 @@ final class CharterOffice {
     }
     void execute(CommandSender s,String[] a)throws SQLException{
         var p=player(s);realm.inWorld(p);String actor=p.getUniqueId().toString();
+        if(a.length>1 && java.util.Set.of("grant","estate","patent").contains(a[0]))realm.fealty.ledger.requireSworn(a[1]);
         switch(a[0]){
             case "patent" -> {
                 usage(a.length>=11,"patent 帝国ID 伯爵|城市|修院 新ID 名称 人名 西 北 东 南 特许条件");
